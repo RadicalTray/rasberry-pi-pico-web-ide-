@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <FreeRTOS.h>
 #include <LittleFS.h>
 #include <WebServer.h>
 #include <NCMEthernetlwIP.h>
@@ -7,6 +8,8 @@
 #include <dhcpserver/dhcpserver.h>
 #include <WebSocketsServer.h>
 #include <GFXMatrix.h>
+#include "phy.hpp"
+#include "ip.hpp"
 
 // --- HUB75 Configuration ---
 struct Hub75Pins {
@@ -22,12 +25,6 @@ struct Hub75Pins {
 GFXMatrix* matrix = nullptr;
 
 // --- Configuration ---
-const uint8_t mac[] = {0x02, 0x02, 0x84, 0x6A, 0x96, 0x00};
-IPAddress ip(192, 168, 7, 1);
-IPAddress gateway(192, 168, 7, 1);
-IPAddress subnet(255, 255, 255, 0);
-
-NCMEthernetlwIP ethusb;
 WebServer server(80);
 WebSocketsServer webSocket(81);
 dhcp_server_t my_dhcp_server;
@@ -82,7 +79,7 @@ extern "C" void log_to_web_c(const char* msg) {
 //         matrix = nullptr;
 //     }
 // }
-    
+
 // --- WebSocket Event Handler ---
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
     (void)num; (void)type; (void)payload; (void)length;
@@ -421,7 +418,7 @@ void run_lua(String code) {
     lua_pushinteger(L, INPUT_PULLUP); lua_setglobal(L, "INPUT_PULLUP");
     lua_pushinteger(L, INPUT_PULLDOWN); lua_setglobal(L, "INPUT_PULLDOWN");
     Serial.println("[run_lua] globals registered");
-    
+
     // Register hub75 module
     lua_newtable(L);
     Serial.println("[run_lua] hub75 table created");
@@ -449,7 +446,7 @@ void run_lua(String code) {
     Serial.println("[run_lua] dostring done");
     last_execution_time = millis() - start_time;
     log_to_web("--- [" + current_file + "] End ---\n");
-    
+
     // Cleanup: Reset used pins
     for (int i = 0; i < used_pins_count; i++) {
         digitalWrite(used_pins[i], LOW);
@@ -470,388 +467,841 @@ void run_lua(String code) {
     stop_requested = false;
 }
 
-// --- HTML GUI ---
-const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Pico Lua Playground</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { font-family: system-ui, sans-serif; margin: 0; background: #fff5f7; color: #4b5563; display: flex; height: 100vh; overflow: hidden; }
-        .sidebar { width: 240px; background: rgba(255,255,255,0.7); backdrop-filter: blur(10px); border-right: 2px dashed #f0b6d2; display: flex; flex-direction: column; padding: 10px; box-sizing: border-box; }
-        .sidebar-header { padding: 15px 10px; font-weight: 700; color: #db2777; border-bottom: 2px solid #fee2e9; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-        .file-list { flex: 1; overflow-y: auto; }
-        .file-item { padding: 10px 15px; cursor: pointer; border-radius: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 14px; background: #fff; transition: 0.2s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-        .file-item:hover { background: #fff1f2; color: #db2777; transform: translateY(-2px); }
-        .file-item.active { background: linear-gradient(135deg, #fecdd3 0%, #ffe4e6 100%); color: #e11d48; border: 1px solid #fda4af; }
-        .delete-btn { color: #f43f5e; opacity: 0.3; transition: 0.2s; font-size: 18px; }
-        .file-item:hover .delete-btn { opacity: 1; }
-        .main { flex: 1; display: flex; flex-direction: column; background: #fff; margin: 15px; border-radius: 24px; border: 2px solid #fbcfe8; overflow: hidden; box-shadow: -10px 0 30px rgba(0,0,0,0.02); }
-        .header { padding: 12px 25px; background: linear-gradient(90deg, #fff0f6 0%, #f3f0ff 100%); border-bottom: 2px solid #f3e8ff; display: flex; justify-content: space-between; align-items: center; }
-        .editor-container { display: flex; flex: 1; overflow: hidden; background: #fafaf9; position: relative; }
-        .line-numbers { width: 45px; padding: 25px 5px 25px 0; font-family: monospace; font-size: 14px; line-height: 1.6; text-align: right; color: #db2777; background: #fff0f6; border-right: 2px dashed #fbcfe8; user-select: none; overflow-y: hidden; box-sizing: border-box; }
-        textarea { flex: 1; border: none; padding: 25px 25px 25px 15px; font-family: monospace; font-size: 14px; outline: none; background: transparent; color: #4c1d95; line-height: 1.6; resize: none; box-sizing: border-box; overflow-y: auto; }
-        .terminal { height: 180px; background: #2d2d2d; color: #4ec9b0; padding: 15px; font-family: monospace; font-size: 12px; overflow-y: auto; border-top: 2px solid #fbcfe8; white-space: pre-wrap; line-height: 1.4; }
-        .btn { padding: 8px 18px; border-radius: 18px; border: none; cursor: pointer; font-weight: 700; font-size: 13px; transition: all 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .btn-run { background: linear-gradient(135deg, #a7f3d0 0%, #34d399 100%); color: white; margin-left: 8px; }
-        .btn-stop { background: linear-gradient(135deg, #fca5a5 0%, #ef4444 100%); color: white; margin-left: 8px; }
-        .btn-save { background: linear-gradient(135deg, #a5f3fc 0%, #818cf8 100%); color: white; }
-        .btn:disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; box-shadow: none; transform: none !important; }
-        #status-light { width: 10px; height: 10px; border-radius: 50%; background: #ccc; display: inline-block; margin-right: 8px; }
-        .running #status-light { background: #34d399; box-shadow: 0 0 8px #34d399; }
-        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 245, 247, 0.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: all 0.3s ease; z-index: 1000; }
-        .modal-overlay.show { opacity: 1; pointer-events: auto; }
-        .modal { background: #ffffff; border-radius: 24px; padding: 30px; width: 320px; border: 2px solid #fbcfe8; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
-        .modal-title { font-weight: 700; font-size: 18px; color: #db2777; margin-bottom: 15px; }
-        .modal-input { width: 100%; padding: 10px 15px; border-radius: 14px; border: 2px solid #fee2e9; box-sizing: border-box; outline: none; font-size: 14px; margin-bottom: 20px; }
-        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
-        .btn-cancel { background: #f3f4f6; color: #6b7280; }
-        .btn-docs { background: linear-gradient(135deg, #c084fc 0%, #a855f7 100%); color: white; margin-right: 8px; }
-        .btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.1); }
-        .modal-large { width: 700px; max-width: 95%; max-height: 85vh; display: flex; flex-direction: column; box-sizing: border-box; }
-        .modal-body { overflow-y: auto; flex: 1; margin-top: 15px; padding-right: 5px; text-align: left; }
-        .api-section { margin-bottom: 24px; }
-        .api-section-title { font-weight: 700; font-size: 16px; color: #db2777; border-bottom: 2px solid #fee2e9; padding-bottom: 6px; margin-bottom: 12px; }
-        .api-item { background: #fff8f9; border-left: 4px solid #db2777; padding: 12px 16px; border-radius: 4px 12px 12px 4px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(219,39,119,0.03); }
-        .api-signature { font-family: monospace; font-weight: 700; color: #9d174d; font-size: 14px; margin-bottom: 6px; }
-        .api-desc { font-size: 13px; color: #4b5563; line-height: 1.5; margin-bottom: 6px; }
-        .api-params { font-size: 12px; color: #6b7280; border-top: 1px dashed #fbcfe8; padding-top: 6px; margin-top: 6px; }
-        .api-param-item { display: inline-block; margin-right: 15px; }
-        .api-param-name { font-weight: 600; color: #b45309; font-family: monospace; }
-        .api-param-type { color: #059669; font-family: monospace; font-size: 11px; }
-        .badge-incomplete { color: #ef4444; font-size: 11px; margin-left: 10px; background: #fee2e9; padding: 2px 8px; border-radius: 10px; font-weight: bold; border: 1px solid #fca5a5; }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="sidebar-header"><span>EXPLORER</span><button onclick="newFile()" style="background:#fff0f6; border:2px solid #fbcfe8; color:#db2777; width:30px; height:30px; border-radius:50%; cursor:pointer; font-weight:700;">+</button></div>
-        <div id="fileList" class="file-list"></div>
-    </div>
-    <div class="main" id="mainContainer">
-        <div class="header">
-            <div id="fileName" style="font-weight:700; color:#7c3aed; font-size:16px;">main.lua</div>
-            <div style="display: flex; align-items: center;">
-                <span id="ramText" style="font-size:11px; margin-right:15px; color:#6b7280; font-family:monospace;">RAM: -- KB</span>
-                <span id="statusText" style="font-size:12px; margin-right:12px; font-weight:700; color:#9333ea;">Idle</span>
-                <div id="status-light"></div>
-                <button class="btn btn-docs" onclick="openDocsModal()">API Docs</button>
-                <button class="btn btn-save" onclick="saveCode()">Save</button>
-                <button class="btn btn-run" id="runBtn" onclick="runCode()">Run</button>
-                <button class="btn btn-stop" id="stopBtn" onclick="stopCode()" disabled>Stop</button>
-            </div>
-        </div>
-        <div class="editor-container">
-            <div class="line-numbers" id="lineNumbers">1</div>
-            <textarea id="editor" spellcheck="false" placeholder="-- Write your Lua code here..." onscroll="syncScroll()" oninput="updateLineNumbers()"></textarea>
-        </div>
-        <div class="terminal" id="terminal">--- Web Terminal ---</div>
-    </div>
-
-    <div id="newFileModal" class="modal-overlay"><div class="modal"><div class="modal-title">Create New File</div><input type="text" id="newFileNameInput" class="modal-input" placeholder="e.g. blink.lua"><div class="modal-actions"><button class="btn btn-cancel" onclick="closeModal()">Cancel</button><button class="btn btn-save" onclick="submitNewFile()">Create</button></div></div></div>
-    <div id="deleteFileModal" class="modal-overlay"><div class="modal"><div class="modal-title">Delete File</div><p id="deleteMessage" style="font-size:14px; margin-bottom:20px; color:#6b7280; font-weight:600;"></p><div class="modal-actions"><button class="btn btn-cancel" onclick="closeDeleteModal()">Cancel</button><button class="btn btn-stop" onclick="submitDeleteFile()">Delete</button></div></div></div>
-
-    <div id="docsModal" class="modal-overlay">
-        <div class="modal modal-large">
-            <div class="modal-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
-                <span>Lua API Documentation</span>
-                <span onclick="closeDocsModal()" style="cursor:pointer; font-size:24px; color:#db2777; font-weight:700;">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="api-section">
-                    <div class="api-section-title">Global Functions & Constants</div>
-                    
-                    <div class="api-item">
-                        <div class="api-signature">print(...)</div>
-                        <div class="api-desc">Outputs values to the Web Terminal for debugging. Accepts multiple arguments of any type.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">...</span> <span class="api-param-type">any</span> - Values to print</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">digitalWrite(pin, state)</div>
-                        <div class="api-desc">Sets the state of a GPIO pin to HIGH or LOW. Useful for controlling onboard or external LEDs.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">pin</span> <span class="api-param-type">number</span> - GPIO pin number (e.g. 0-29)</span>
-                            <span class="api-param-item"><span class="api-param-name">state</span> <span class="api-param-type">number</span> - Pin state (HIGH or LOW)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">analogWrite(pin, val)</div>
-                        <div class="api-desc">Sends a PWM signal (0-255) to a GPIO pin. Useful for fading LEDs.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">pin</span> <span class="api-param-type">number</span> - GPIO pin number (e.g. 0-29)</span>
-                            <span class="api-param-item"><span class="api-param-name">val</span> <span class="api-param-type">number</span> - PWM value (0 to 255)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">digitalRead(pin)</div>
-                        <div class="api-desc">Reads the digital state of a GPIO pin (returns HIGH/1 or LOW/0).</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">pin</span> <span class="api-param-type">number</span> - GPIO pin number</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">analogRead(pin)</div>
-                        <div class="api-desc">Reads the analog voltage value on an ADC pin (returns 0-1023).</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">pin</span> <span class="api-param-type">number</span> - ADC pin number (e.g. 26-28)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">pinMode(pin, mode)</div>
-                        <div class="api-desc">Configures the input/output mode of a GPIO pin.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">pin</span> <span class="api-param-type">number</span> - GPIO pin number</span>
-                            <span class="api-param-item"><span class="api-param-name">mode</span> <span class="api-param-type">number</span> - Mode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">delay(ms)</div>
-                        <div class="api-desc">Pauses the execution of the script for a specified duration of milliseconds.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">ms</span> <span class="api-param-type">number</span> - Delay duration in milliseconds</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">Constants</div>
-                        <div class="api-desc">Pre-defined global variables:</div>
-                        <div class="api-params" style="border:none; padding:0; margin:0;">
-                            <span class="api-param-item"><span class="api-param-name">HIGH</span> <span class="api-param-type">1</span></span>
-                            <span class="api-param-item"><span class="api-param-name">LOW</span> <span class="api-param-type">0</span></span>
-                            <span class="api-param-item"><span class="api-param-name">LED_BUILTIN</span> <span class="api-param-type">25</span></span>
-                            <span class="api-param-item"><span class="api-param-name">INPUT</span> <span class="api-param-type">0</span></span>
-                            <span class="api-param-item"><span class="api-param-name">OUTPUT</span> <span class="api-param-type">1</span></span>
-                            <span class="api-param-item"><span class="api-param-name">INPUT_PULLUP</span> <span class="api-param-type">2</span></span>
-                            <span class="api-param-item"><span class="api-param-name">INPUT_PULLDOWN</span> <span class="api-param-type">3</span></span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="api-section">
-                    <div class="api-section-title" style="display: flex; align-items: center;">hub75 Module (HUB75 RGB LED Matrix 64x64) <span class="badge-incomplete">INCOMPLETE</span></div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.setPins(rgbTable, addrTable, clk, lat, oe)</div>
-                        <div class="api-desc">Configures the pins dynamically. Must be called first before calling begin().</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">rgbTable</span> <span class="api-param-type">table</span> - Array of 6 numbers for {R1, G1, B1, R2, G2, B2}</span>
-                            <span class="api-param-item"><span class="api-param-name">addrTable</span> <span class="api-param-type">table</span> - Array of 5 numbers for {A, B, C, D, E}</span>
-                            <span class="api-param-item"><span class="api-param-name">clk</span> <span class="api-param-type">number</span> - Clock pin</span>
-                            <span class="api-param-item"><span class="api-param-name">lat</span> <span class="api-param-type">number</span> - Latch pin</span>
-                            <span class="api-param-item"><span class="api-param-name">oe</span> <span class="api-param-type">number</span> - Output enable pin</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.begin(width, height)</div>
-                        <div class="api-desc">Initializes the matrix driver. Creates the frame buffer and starts the PIO driving signals.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">width</span> <span class="api-param-type">number</span> - Matrix width (e.g. 64)</span>
-                            <span class="api-param-item"><span class="api-param-name">height</span> <span class="api-param-type">number</span> - Matrix height (e.g. 64)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.show()</div>
-                        <div class="api-desc">Pushes the back buffer to the LED matrix panel to display the changes. Call this to refresh the screen.</div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.fillScreen(r, g, b)</div>
-                        <div class="api-desc">Fills the frame buffer with a single solid RGB color.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">r</span>, <span class="api-param-name">g</span>, <span class="api-param-name">b</span> <span class="api-param-type">number</span> - RGB components (0-255)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.drawPixel(x, y, r, g, b)</div>
-                        <div class="api-desc">Draws a pixel at the given coordinate with specified color.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">x</span>, <span class="api-param-name">y</span> <span class="api-param-type">number</span> - Coordinates (0 to 63)</span>
-                            <span class="api-param-item"><span class="api-param-name">r</span>, <span class="api-param-name">g</span>, <span class="api-param-name">b</span> <span class="api-param-type">number</span> - RGB components (0-255)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.drawLine(x0, y0, x1, y1, r, g, b)</div>
-                        <div class="api-desc">Draws a straight line between two points.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">x0</span>, <span class="api-param-name">y0</span> <span class="api-param-type">number</span> - Start point coordinates</span>
-                            <span class="api-param-item"><span class="api-param-name">x1</span>, <span class="api-param-name">y1</span> <span class="api-param-type">number</span> - End point coordinates</span>
-                            <span class="api-param-item"><span class="api-param-name">r</span>, <span class="api-param-name">g</span>, <span class="api-param-name">b</span> <span class="api-param-type">number</span> - RGB components (0-255)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.drawRect(x, y, w, h, r, g, b)</div>
-                        <div class="api-desc">Draws an unfilled rectangle outline.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">x</span>, <span class="api-param-name">y</span> <span class="api-param-type">number</span> - Top-left coordinates</span>
-                            <span class="api-param-item"><span class="api-param-name">w</span>, <span class="api-param-name">h</span> <span class="api-param-type">number</span> - Width and height</span>
-                            <span class="api-param-item"><span class="api-param-name">r</span>, <span class="api-param-name">g</span>, <span class="api-param-name">b</span> <span class="api-param-type">number</span> - RGB components (0-255)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.fillRect(x, y, w, h, r, g, b)</div>
-                        <div class="api-desc">Draws a filled rectangle.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">x</span>, <span class="api-param-name">y</span> <span class="api-param-type">number</span> - Top-left coordinates</span>
-                            <span class="api-param-item"><span class="api-param-name">w</span>, <span class="api-param-name">h</span> <span class="api-param-type">number</span> - Width and height</span>
-                            <span class="api-param-item"><span class="api-param-name">r</span>, <span class="api-param-name">g</span>, <span class="api-param-name">b</span> <span class="api-param-type">number</span> - RGB components (0-255)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.drawCircle(x, y, radius, r, g, b)</div>
-                        <div class="api-desc">Draws a circle outline with specified radius.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">x</span>, <span class="api-param-name">y</span> <span class="api-param-type">number</span> - Center coordinates</span>
-                            <span class="api-param-item"><span class="api-param-name">radius</span> <span class="api-param-type">number</span> - Circle radius</span>
-                            <span class="api-param-item"><span class="api-param-name">r</span>, <span class="api-param-name">g</span>, <span class="api-param-name">b</span> <span class="api-param-type">number</span> - RGB components (0-255)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.fillCircle(x, y, radius, r, g, b)</div>
-                        <div class="api-desc">Draws a filled circle with specified radius.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">x</span>, <span class="api-param-name">y</span> <span class="api-param-type">number</span> - Center coordinates</span>
-                            <span class="api-param-item"><span class="api-param-name">radius</span> <span class="api-param-type">number</span> - Circle radius</span>
-                            <span class="api-param-item"><span class="api-param-name">r</span>, <span class="api-param-name">g</span>, <span class="api-param-name">b</span> <span class="api-param-type">number</span> - RGB components (0-255)</span>
-                        </div>
-                    </div>
-
-                    <div class="api-item">
-                        <div class="api-signature">hub75.drawString(text, x, y, r, g, b)</div>
-                        <div class="api-desc">Draws text starting at the given coordinates.</div>
-                        <div class="api-params">
-                            <span class="api-param-item"><span class="api-param-name">text</span> <span class="api-param-type">string</span> - String message to draw</span>
-                            <span class="api-param-item"><span class="api-param-name">x</span>, <span class="api-param-name">y</span> <span class="api-param-type">number</span> - Text starting baseline coordinates</span>
-                            <span class="api-param-item"><span class="api-param-name">r</span>, <span class="api-param-name">g</span>, <span class="api-param-name">b</span> <span class="api-param-type">number</span> - RGB components (0-255)</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-    let currentPath = "/main.lua";
-    let fileToDelete = "";
-    let isWsConnected = false;
-    let ws;
-
-    const editor = document.getElementById("editor");
-    const lineNumbers = document.getElementById("lineNumbers");
-
-    function updateLineNumbers() {
-        const lines = editor.value.split('\n');
-        const count = lines.length;
-        let numbers = "";
-        for (let i = 1; i <= count; i++) {
-            numbers += i + '<br>';
-        }
-        lineNumbers.innerHTML = numbers;
-    }
-
-    function syncScroll() {
-        lineNumbers.scrollTop = editor.scrollTop;
-    }
-
-    function connectWS() {
-        ws = new WebSocket('ws://' + window.location.hostname + ':81');
-        ws.onopen = () => { isWsConnected = true; console.log("WS Connected"); };
-        ws.onclose = () => { isWsConnected = false; console.log("WS Disconnected. Reconnecting..."); setTimeout(connectWS, 2000); };
-        ws.onmessage = (e) => {
-            const term = document.getElementById("terminal");
-            term.innerText += e.data;
-            term.scrollTop = term.scrollHeight;
-        };
-        ws.onerror = (err) => { ws.close(); };
-    }
-
-    function listFiles() { fetch('/list_files').then(r => r.json()).then(files => {
-        const list = document.getElementById("fileList"); list.innerHTML = "";
-        files.forEach(f => {
-            const div = document.createElement("div");
-            div.className = "file-item" + (("/"+f.name) === currentPath ? " active" : "");
-            div.innerHTML = `<span>${f.name}</span><span class="delete-btn" onclick="deleteFile('${f.name}', event)">&times;</span>`;
-            div.onclick = () => loadFile("/" + f.name); list.appendChild(div);
-        });
-    }).catch(()=>{});}
-
-    function loadFile(path) { currentPath = path; document.getElementById("fileName").innerText = path.substring(1); fetch('/read?path=' + path).then(r => r.text()).then(t => { editor.value = t; updateLineNumbers(); listFiles(); }).catch(()=>{}); }
-    function saveCode() { fetch('/upload?path=' + currentPath, { method: 'POST', body: editor.value }).then(() => listFiles()).catch(()=>{}); }
-    function runCode() { fetch('/run', { method: 'POST', body: editor.value }).catch(()=>{}); }
-    function stopCode() { fetch('/stop', { method: 'POST' }).catch(()=>{}); }
-    function newFile() { document.getElementById("newFileModal").classList.add("show"); document.getElementById("newFileNameInput").focus(); }
-    function closeModal() { document.getElementById("newFileModal").classList.remove("show"); }
-    function submitNewFile() {
-        const name = document.getElementById("newFileNameInput").value.trim();
-        if(name) {
-            const filename = name.endsWith('.lua') ? name : name + '.lua';
-            const path = filename.startsWith("/") ? filename : "/" + filename;
-            fetch('/create?path=' + path, { method: 'POST' }).then(() => { loadFile(path); closeModal(); });
-        }
-    }
-    function deleteFile(name, event) { event.stopPropagation(); if (name === "main.lua") return; fileToDelete = name; document.getElementById("deleteMessage").innerText = `Delete ${name}?`; document.getElementById("deleteFileModal").classList.add("show"); }
-    function closeDeleteModal() { document.getElementById("deleteFileModal").classList.remove("show"); }
-    function submitDeleteFile() { fetch('/delete?path=/' + fileToDelete, { method: 'POST' }).then(() => { if (currentPath === "/" + fileToDelete) loadFile("/main.lua"); else listFiles(); closeDeleteModal(); }); }
-    function openDocsModal() { document.getElementById("docsModal").classList.add("show"); }
-    function closeDocsModal() { document.getElementById("docsModal").classList.remove("show"); }
-
-    setInterval(() => {
-        fetch('/poll').then(r => r.json()).then(data => {
-            const container = document.getElementById("mainContainer");
-            const stText = document.getElementById("statusText");
-            const ramText = document.getElementById("ramText");
-            const runBtn = document.getElementById("runBtn");
-            const stopBtn = document.getElementById("stopBtn");
-            const term = document.getElementById("terminal");
-            
-            if (data.free_heap) {
-                ramText.innerText = "RAM: " + Math.round(data.free_heap / 1024) + " KB";
-            }
-
-            if(data.running) {
-                container.classList.add("running");
-                stText.innerText = "Running...";
-                runBtn.disabled = true; stopBtn.disabled = false;
-            } else {
-                container.classList.remove("running");
-                stText.innerText = "Idle";
-                runBtn.disabled = false; stopBtn.disabled = true;
-            }
-            if(data.logs && !isWsConnected) {
-                term.innerText += data.logs;
-                term.scrollTop = term.scrollHeight;
-            }
-        }).catch(()=>{});
-    }, 2000);
-
-    window.onload = () => { loadFile("/main.lua"); connectWS(); };
-    </script>
-</body>
-</html>
-)rawliteral";
-
 // --- Web Handlers ---
-void handleRoot() { server.send(200, "text/html", index_html); }
+void handleRoot() {
+    String s;
+
+    Serial.printf("free_heap: %d\n", rp2040.getFreeHeap());
+
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<!doctype html><title>Pico Lua Playground</title><meta name=viewport content="width=device-width,initial-scale=1"><div class=sidebar><div class=sidebar-header><span>EXPLORER</span><button onclick=newFile() style="background:#fff0f6;border:2px solid #fbcfe8;color:#db2777;width:30px;height:30px;border-radius:50%;cursor:pointer;font-weight:700">)===";
+    server.send(200, "text/html", s);
+    loopPhy(millis());
+
+    Serial.printf("free_heap: %d\n", rp2040.getFreeHeap());
+
+    s = ""; // Do you need this?
+    s += R"===(+</button></div><div id=fileList class=file-list></div></div><div class=main id=mainContainer><div class=header><div id=fileName style=font-weight:700;color:#7c3aed;font-size:16px>main.lua</div><div style=display:flex;align-items:center><span id=ramText style=font-size:11px;margin-right:15px;color:#6b7280;font-family:monospace>RAM: -- KB</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    Serial.printf("free_heap: %d\n", rp2040.getFreeHeap());
+
+    s = "";
+    s += R"===(<span id=statusText style=font-size:12px;margin-right:12px;font-weight:700;color:#9333ea>Idle</span><div id=status-light></div><button class="btn btn-docs" onclick=openDocsModal()>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    Serial.printf("free_heap: %d\n", rp2040.getFreeHeap());
+
+    s = "";
+    s += R"===(API Docs)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(</button>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<button class="btn btn-save" onclick=saveCode()>Save</button>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<button class="btn btn-run" id=runBtn onclick=runCode()>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(Run)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    loopPhy(millis());
+    s = "";
+    s += R"===(</button>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<button class="btn btn-stop" id=stopBtn onclick=stopCode() disabled>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    Serial.printf("--- Web Terminal --- : %d\n", rp2040.getFreeHeap());
+
+    s = "";
+    s += R"===(Stop</button></div></div><div class=editor-container><div class=line-numbers id=lineNumbers>1</div><textarea id=editor spellcheck=false placeholder="-- Write your Lua code here..." onscroll=syncScroll() oninput=updateLineNumbers()></textarea></div><div class=terminal id=terminal>--- Web Terminal ---</div></div><div id=newFileModal class=modal-overlay><div class=modal><div class=modal-title>Create New File</div><input id=newFileNameInput class=modal-input placeholder="e.g. blink.lua"><div class=modal-actions><button class="btn btn-cancel" onclick=closeModal()>Cancel</button><button class="btn btn-save" onclick=submitNewFile()>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    Serial.printf("--- Delete file --- : %d\n", rp2040.getFreeHeap());
+
+    s = "";
+    s += R"===(Create</button></div></div></div><div id=deleteFileModal class=modal-overlay><div class=modal><div class=modal-title>Delete File</div><p id=deleteMessage style=font-size:14px;margin-bottom:20px;color:#6b7280;font-weight:600><div class=modal-actions><button class="btn btn-cancel" onclick=closeDeleteModal()>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(Cancel</button><button class="btn btn-stop" onclick=submitDeleteFile()>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    Serial.printf("--- Lua API Documentation --- : %d\n", rp2040.getFreeHeap());
+
+    s = "";
+    s += R"===(Delete</button></div></div></div><div id=docsModal class=modal-overlay><div class="modal modal-large"><div class=modal-title style=display:flex;justify-content:space-between;align-items:center;margin-bottom:10px><span>Lua API Documentation</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    Serial.printf("--- Outputs values .... --- : %d\n", rp2040.getFreeHeap());
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span onclick=closeDocsModal() style=cursor:pointer;font-size:24px;color:#db2777;font-weight:700>&#215;</span></div><div class=modal-body><div class=api-section><div class=api-section-title>Global Functions & Constants</div><div class=api-item><div class=api-signature>print(...)</div><div class=api-desc>Outputs values to the Web Terminal for debugging. Accepts)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(multiple arguments of any type.</div><div class=api-params><span class=api-param-item><span class=api-param-name>...</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>any</span> - Values to)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(print</span></div></div><div class=api-item><div class=api-signature>digitalWrite(pin, state)</div><div class=api-desc>Sets the state of a GPIO pin to HIGH or LOW. Useful for)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(controlling onboard or external LEDs.</div><div class=api-params><span class=api-param-item><span class=api-param-name>pin</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - GPIO pin number)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((e.g. 0-29)</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>state</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Pin state (HIGH)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(or LOW)</span></div></div><div class=api-item><div class=api-signature>analogWrite(pin, val)</div><div class=api-desc>Sends a PWM signal (0-255) to a GPIO pin. Useful for fading)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(LEDs.</div><div class=api-params><span class=api-param-item><span class=api-param-name>pin</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - GPIO pin number)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((e.g. 0-29)</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>val</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - PWM value (0 to)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(255)</span></div></div><div class=api-item><div class=api-signature>digitalRead(pin)</div><div class=api-desc>Reads the digital state of a GPIO pin (returns HIGH/1 or LOW/0).</div><div class=api-params><span class=api-param-item><span class=api-param-name>pin</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - GPIO pin)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(number</span></div></div><div class=api-item><div class=api-signature>analogRead(pin)</div><div class=api-desc>Reads the analog voltage value on an ADC pin (returns 0-1023).</div><div class=api-params><span class=api-param-item><span class=api-param-name>pin</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - ADC pin number)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    loopPhy(millis());
+    s = "";
+    s += R"===((e.g. 26-28)</span></div></div><div class=api-item><div class=api-signature>pinMode(pin, mode)</div><div class=api-desc>Configures the input/output mode of a GPIO pin.</div><div class=api-params><span class=api-param-item><span class=api-param-name>pin</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - GPIO pin)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(number</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>mode</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Mode (INPUT,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)</span></div></div><div class=api-item><div class=api-signature>delay(ms)</div><div class=api-desc>Pauses the execution of the script for a specified duration of)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(milliseconds.</div><div class=api-params><span class=api-param-item><span class=api-param-name>ms</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Delay duration in)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(milliseconds</span></div></div><div class=api-item><div class=api-signature>Constants</div><div class=api-desc>Pre-defined global variables:</div><div class=api-params style=border:none;padding:0;margin:0><span class=api-param-item><span class=api-param-name>HIGH</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>1</span></span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>LOW</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>0</span></span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>LED_BUILTIN</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>25</span></span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>INPUT</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>0</span></span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>OUTPUT</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>1</span></span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>INPUT_PULLUP</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    loopPhy(millis());
+    s += R"===(<span class=api-param-type>2</span></span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>INPUT_PULLDOWN</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>3</span></span></div></div></div><div class=api-section><div class=api-section-title style=display:flex;align-items:center>hub75 Module (HUB75 RGB LED Matrix 64x64))===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=badge-incomplete>INCOMPLETE</span></div><div class=api-item><div class=api-signature>hub75.setPins(rgbTable, addrTable, clk, lat, oe)</div><div class=api-desc>Configures the pins dynamically. Must be called first before)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(calling begin().</div><div class=api-params><span class=api-param-item><span class=api-param-name>rgbTable</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>table</span> - Array of 6 numbers)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(for {R1, G1, B1, R2, G2, B2}</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>addrTable</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>table</span> - Array of 5 numbers)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(for {A, B, C, D, E}</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>clk</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Clock pin</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>lat</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Latch pin</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>oe</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Output enable)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(pin</span></div></div><div class=api-item><div class=api-signature>hub75.begin(width, height)</div><div class=api-desc>Initializes the matrix driver. Creates the frame buffer and)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(starts the PIO driving signals.</div><div class=api-params><span class=api-param-item><span class=api-param-name>width</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Matrix width)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((e.g. 64)</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>height</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Matrix height)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((e.g. 64)</span></div></div><div class=api-item><div class=api-signature>hub75.show()</div><div class=api-desc>Pushes the back buffer to the LED matrix panel to display the)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(changes. Call this to refresh the screen.</div></div><div class=api-item><div class=api-signature>hub75.fillScreen(r, g, b)</div><div class=api-desc>Fills the frame buffer with a single solid RGB color.</div><div class=api-params><span class=api-param-item><span class=api-param-name>r</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>g</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>b</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - RGB components)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((0-255)</span></div></div><div class=api-item><div class=api-signature>hub75.drawPixel(x, y, r, g, b)</div><div class=api-desc>Draws a pixel at the given coordinate with specified color.</div><div class=api-params><span class=api-param-item><span class=api-param-name>x</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>y</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Coordinates (0 to)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(63)</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>r</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>g</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>b</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    loopPhy(millis());
+    s += R"===(<span class=api-param-type>number</span> - RGB components)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((0-255)</span></div></div><div class=api-item><div class=api-signature>hub75.drawLine(x0, y0, x1, y1, r, g, b)</div><div class=api-desc>Draws a straight line between two points.</div><div class=api-params><span class=api-param-item><span class=api-param-name>x0</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>y0</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Start point)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(coordinates</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>x1</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>y1</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - End point)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(coordinates</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>r</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>g</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>b</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - RGB components)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((0-255)</span></div></div><div class=api-item><div class=api-signature>hub75.drawRect(x, y, w, h, r, g, b)</div><div class=api-desc>Draws an unfilled rectangle outline.</div><div class=api-params><span class=api-param-item><span class=api-param-name>x</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>y</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Top-left)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(coordinates</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>w</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>h</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Width and)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(height</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>r</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>g</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>b</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - RGB components)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((0-255)</span></div></div><div class=api-item><div class=api-signature>hub75.fillRect(x, y, w, h, r, g, b)</div><div class=api-desc>Draws a filled rectangle.</div><div class=api-params><span class=api-param-item><span class=api-param-name>x</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>y</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Top-left)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(coordinates</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>w</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>h</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Width and)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(height</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>r</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>g</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>b</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - RGB components)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((0-255)</span></div></div><div class=api-item><div class=api-signature>hub75.drawCircle(x, y, radius, r, g, b)</div><div class=api-desc>Draws a circle outline with specified radius.</div><div class=api-params><span class=api-param-item><span class=api-param-name>x</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>y</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Center)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(coordinates</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>radius</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Circle)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(radius</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>r</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>g</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>b</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - RGB components)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    loopPhy(millis());
+    s += R"===((0-255)</span></div></div><div class=api-item><div class=api-signature>hub75.fillCircle(x, y, radius, r, g, b)</div><div class=api-desc>Draws a filled circle with specified radius.</div><div class=api-params><span class=api-param-item><span class=api-param-name>x</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>y</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Center)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(coordinates</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>radius</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Circle)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(radius</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>r</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>g</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>b</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - RGB components)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((0-255)</span></div></div><div class=api-item><div class=api-signature>hub75.drawString(text, x, y, r, g, b)</div><div class=api-desc>Draws text starting at the given coordinates.</div><div class=api-params><span class=api-param-item><span class=api-param-name>text</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>string</span> - String message to)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(draw</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>x</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>y</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - Text starting)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(baseline coordinates</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-item><span class=api-param-name>r</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>g</span>,)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-name>b</span>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===(<span class=api-param-type>number</span> - RGB components)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    s = "";
+    s += R"===((0-255)</span></div></div></div></div></div></div><script>let currentPath="/main.lua",fileToDelete="",isWsConnected=!1,ws;const editor=document.getElementById("editor"),lineNumbers=document.getElementById("lineNumbers");function updateLineNumbers(){const t=editor.value.split(`)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    Serial.printf("BEEG JAVASCRIPT: %d\n", rp2040.getFreeHeap());
+
+    s = "";
+    loopPhy(millis());
+    s += R"===(`),n=t.length;let e="";for(let t=1;t<=n;t++)e+=t+"<br>";lineNumbers.innerHTML=e}function syncScroll(){lineNumbers.scrollTop=editor.scrollTop}function connectWS(){ws=new WebSocket("ws://"+window.location.hostname+":81"),ws.onopen=()=>{isWsConnected=!0,console.log("WS Connected")},ws.onclose=()=>{isWsConnected=!1,console.log("WS Disconnected. Reconnecting..."),setTimeout(connectWS,2e3)},ws.onmessage=e=>{const t=document.getElementById("terminal");t.innerText+=e.data,t.scrollTop=t.scrollHeight},ws.onerror=e=>{ws.close()}}function listFiles(){fetch("/list_files").then(e=>e.json()).then(e=>{const t=document.getElementById("fileList");t.innerHTML="",e.forEach(e=>{const n=document.createElement("div");n.className="file-item"+("/"+e.name===currentPath?" active":""),n.innerHTML=`<span>${e.name}</span><span class="delete-btn" onclick="deleteFile('${e.name}', event)">&times;</span>`,n.onclick=()=>loadFile("/"+e.name),t.appendChild(n)})}).catch(()=>{})}function loadFile(e){currentPath=e,document.getElementById("fileName").innerText=e.substring(1),fetch("/read?path="+e).then(e=>e.text()).then(e=>{editor.value=e,updateLineNumbers(),listFiles()}).catch(()=>{})}function saveCode(){fetch("/upload?path="+currentPath,{method:"POST",body:editor.value}).then(()=>listFiles()).catch(()=>{})}function runCode(){fetch("/run",{method:"POST",body:editor.value}).catch(()=>{})}function stopCode(){fetch("/stop",{method:"POST"}).catch(()=>{})}function newFile(){document.getElementById("newFileModal").classList.add("show"),document.getElementById("newFileNameInput").focus()}function closeModal(){document.getElementById("newFileModal").classList.remove("show")}function submitNewFile(){const e=document.getElementById("newFileNameInput").value.trim();if(e){const t=e.endsWith(".lua")?e:e+".lua",n=t.startsWith("/")?t:"/"+t;fetch("/create?path="+n,{method:"POST"}).then(()=>{loadFile(n),closeModal()})}}function deleteFile(e,t){if(t.stopPropagation(),e==="main.lua")return;fileToDelete=e,document.getElementById("deleteMessage").innerText=`Delete ${e}?`,document.getElementById("deleteFileModal").classList.add("show")}function closeDeleteModal(){document.getElementById("deleteFileModal").classList.remove("show")}function submitDeleteFile(){fetch("/delete?path=/"+fileToDelete,{method:"POST"}).then(()=>{currentPath==="/"+fileToDelete?loadFile("/main.lua"):listFiles(),closeDeleteModal()})}function openDocsModal(){document.getElementById("docsModal").classList.add("show")}function closeDocsModal(){document.getElementById("docsModal").classList.remove("show")}setInterval(()=>{fetch("/poll").then(e=>e.json()).then(e=>{const n=document.getElementById("mainContainer"),s=document.getElementById("statusText"),a=document.getElementById("ramText"),o=document.getElementById("runBtn"),i=document.getElementById("stopBtn"),t=document.getElementById("terminal");e.free_heap&&(a.innerText="RAM: "+Math.round(e.free_heap/1024)+" KB"),e.running?(n.classList.add("running"),s.innerText="Running...",o.disabled=!0,i.disabled=!1):(n.classList.remove("running"),s.innerText="Idle",o.disabled=!1,i.disabled=!0),e.logs&&!isWsConnected&&(t.innerText+=e.logs,t.scrollTop=t.scrollHeight)}).catch(()=>{})},2e3),window.onload=()=>{loadFile("/main.lua"),connectWS()}</script>)===";
+    server.sendContent(s);
+    loopPhy(millis());
+
+    server.sendContent("");
+    loopPhy(millis());
+}
+
 void handleList() {
     String json = "["; Dir root = LittleFS.openDir("/"); bool first = true;
     while (root.next()) { if (!first) json += ","; json += "{\"name\":\"" + root.fileName() + "\"}"; first = false; }
     json += "]"; server.send(200, "application/json", json);
 }
+
 void handleRead() {
     String path = server.arg("path");
     if (LittleFS.exists(path)) {
@@ -897,39 +1347,46 @@ void handlePoll() {
     web_serial_buffer = "";
 }
 
+void loopPhyNow() {
+    loopPhy(millis());
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    LittleFS.begin();
-    ethusb.config(ip, gateway, subnet);
-    ethusb.begin(mac);
+    // LittleFS.begin();
+
+    initPhy();
 
     // Initialize DHCP Server
-    ip_addr_t lwip_ip, lwip_mask;
-    IP_ADDR4(&lwip_ip, ip[0], ip[1], ip[2], ip[3]);
-    IP_ADDR4(&lwip_mask, subnet[0], subnet[1], subnet[2], subnet[3]);
-    dhcp_server_init(&my_dhcp_server, &lwip_ip, &lwip_mask, netif_default);
+    // ip_addr_t lwip_ip, lwip_mask;
+    // IP_ADDR4(&lwip_ip, PHY_IP_ADDR[0], PHY_IP_ADDR[1], PHY_IP_ADDR[2], PHY_IP_ADDR[3]);
+    // IP_ADDR4(&lwip_mask, PHY_NETWORK_MASK[0], PHY_NETWORK_MASK[1], PHY_NETWORK_MASK[2], PHY_NETWORK_MASK[3]);
+    // dhcp_server_init(&my_dhcp_server, &lwip_ip, &lwip_mask, netif_default);
 
     server.on("/", handleRoot);
-    server.on("/list_files", handleList);
-    server.on("/read", handleRead);
-    server.on("/upload", HTTP_POST, handleUpload);
-    server.on("/create", HTTP_POST, handleCreate);
-    server.on("/delete", HTTP_POST, handleDelete);
-    server.on("/run", HTTP_POST, handleRun);
-    server.on("/stop", HTTP_POST, handleStop);
-    server.on("/poll", handlePoll);
+    // server.on("/list_files", handleList);
+    // server.on("/read", handleRead);
+    // server.on("/upload", HTTP_POST, handleUpload);
+    // server.on("/create", HTTP_POST, handleCreate);
+    // server.on("/delete", HTTP_POST, handleDelete);
+    // server.on("/run", HTTP_POST, handleRun);
+    // server.on("/stop", HTTP_POST, handleStop);
+    // server.on("/poll", handlePoll);
     server.begin();
-    webSocket.begin();
-    webSocket.onEvent(webSocketEvent);
+    // webSocket.begin();
+    // webSocket.onEvent(webSocketEvent);
+
+    // Scheduler.startLoop(loopPhyNow());
 }
 
 void loop() {
+    loopPhyNow();
     server.handleClient();
-    webSocket.loop();
-    if (run_requested) {
-        run_requested = false;
-        delay(50);
-        run_lua(lua_code_pending);
-    }
+    // webSocket.loop();
+    // if (run_requested) {
+    //     run_requested = false;
+    //     delay(50);
+    //     run_lua(lua_code_pending);
+    // }
 }
