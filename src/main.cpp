@@ -1,12 +1,17 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <WebServer.h>
-#include <NCMEthernetlwIP.h>
+#include <FreeRTOS.h>
 #include <lua/lua.hpp>
 #include <lwip/netif.h>
 #include <dhcpserver/dhcpserver.h>
 #include <WebSocketsServer.h>
 #include <GFXMatrix.h>
+
+#include "phy.hpp"
+
+// PHY Servicing Task
+TaskHandle_t loopPhyHandle = NULL;
 
 // --- HUB75 Configuration ---
 struct Hub75Pins {
@@ -22,12 +27,6 @@ struct Hub75Pins {
 GFXMatrix* matrix = nullptr;
 
 // --- Configuration ---
-const uint8_t mac[] = {0x02, 0x02, 0x84, 0x6A, 0x96, 0x00};
-IPAddress ip(192, 168, 7, 1);
-IPAddress gateway(192, 168, 7, 1);
-IPAddress subnet(255, 255, 255, 0);
-
-NCMEthernetlwIP ethusb;
 WebServer server(80);
 WebSocketsServer webSocket(81);
 dhcp_server_t my_dhcp_server;
@@ -82,7 +81,7 @@ extern "C" void log_to_web_c(const char* msg) {
 //         matrix = nullptr;
 //     }
 // }
-    
+
 // --- WebSocket Event Handler ---
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
     (void)num; (void)type; (void)payload; (void)length;
@@ -421,7 +420,7 @@ void run_lua(String code) {
     lua_pushinteger(L, INPUT_PULLUP); lua_setglobal(L, "INPUT_PULLUP");
     lua_pushinteger(L, INPUT_PULLDOWN); lua_setglobal(L, "INPUT_PULLDOWN");
     Serial.println("[run_lua] globals registered");
-    
+
     // Register hub75 module
     lua_newtable(L);
     Serial.println("[run_lua] hub75 table created");
@@ -449,7 +448,7 @@ void run_lua(String code) {
     Serial.println("[run_lua] dostring done");
     last_execution_time = millis() - start_time;
     log_to_web("--- [" + current_file + "] End ---\n");
-    
+
     // Cleanup: Reset used pins
     for (int i = 0; i < used_pins_count; i++) {
         digitalWrite(used_pins[i], LOW);
@@ -560,7 +559,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             <div class="modal-body">
                 <div class="api-section">
                     <div class="api-section-title">Global Functions & Constants</div>
-                    
+
                     <div class="api-item">
                         <div class="api-signature">print(...)</div>
                         <div class="api-desc">Outputs values to the Web Terminal for debugging. Accepts multiple arguments of any type.</div>
@@ -818,7 +817,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             const runBtn = document.getElementById("runBtn");
             const stopBtn = document.getElementById("stopBtn");
             const term = document.getElementById("terminal");
-            
+
             if (data.free_heap) {
                 ramText.innerText = "RAM: " + Math.round(data.free_heap / 1024) + " KB";
             }
@@ -897,14 +896,38 @@ void handlePoll() {
     web_serial_buffer = "";
 }
 
+void loopPhy(void *params) {
+    while (true) {
+        servicePhy();
+        // TODO: Put some delay() here maybe
+    }
+}
+
 void setup() {
     Serial.begin(115200);
-    delay(1000);
+    while (!Serial) {}
+
     LittleFS.begin();
-    ethusb.config(ip, gateway, subnet);
-    ethusb.begin(mac);
+
+    initPhy();
+
+    // WARN: dunno if constantly servicing PHY in another core will be good
+    //  since it also interacts with LWIP even though it should be thread-safe
+    //  because LWIP in earlephilhower runs in its own thread.
+    //  (LWIP functions call earlephilhower's wrappers which queue calls
+    //  to the LWIP thread)
+    //
+    // more important than LWIP cuz LWIP depends on PHY?
+    // LWIP_TASK_PRIORITY defaults to (configMAX_PRIORITIES - 2)
+    // (configMAX_PRIORITIES - 1) is max
+    //
+    // 1024 words stack size is random, should probably check if it's too big or too small.
+    // Currently works tho
+    xTaskCreate(loopPhy, "loopPhy", 1024, NULL, (configMAX_PRIORITIES - 1), &loopPhyHandle);
 
     // Initialize DHCP Server
+    IPAddress const ip = PHY_IP_ADDR;
+    IPAddress const subnet = PHY_NETWORK_MASK;
     ip_addr_t lwip_ip, lwip_mask;
     IP_ADDR4(&lwip_ip, ip[0], ip[1], ip[2], ip[3]);
     IP_ADDR4(&lwip_mask, subnet[0], subnet[1], subnet[2], subnet[3]);
