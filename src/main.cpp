@@ -11,6 +11,26 @@
 #include "phy.hpp"
 #include "ip.hpp"
 
+// see
+//  https://arduino-pico.readthedocs.io/en/latest/freertos.html
+//  /home/luna/.platformio/packages/framework-arduinopico/cores/rp2040/freertos/freertos-lwip.cpp
+// on how to create a task
+//
+// TC6_Arduino_10BASE_T1S::service() calls framework-arduinopico's lwip wrappers
+// (sys_check_timeouts()'s the only fn?) which should be thread safe
+//
+// task priority should be around LWIP_TASK_PRIORITY? higher? lower?
+// higher cuz LWIP depends on the PHY being serviced?
+//
+// wtf is lwip_callback() and why is it the only function that can have fromISR = true
+// (ISR = Interrupt Service Routine)
+// is this where our PHY servicing should go?
+//
+// What do they mean by this? 😨 framework-arduinopico/libraries/lwIP_USB_NCM/src/NCMEthernetlwIP.cpp
+// In freertos we can afford to block, as long as no other code uses tinyUSB and lwIP at the same time.
+// we're probably not using tinyUSB rn?
+
+
 // --- HUB75 Configuration ---
 struct Hub75Pins {
     int* rgb = nullptr;
