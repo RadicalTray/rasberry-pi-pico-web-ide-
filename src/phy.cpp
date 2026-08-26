@@ -7,14 +7,14 @@ Arduino_10BASE_T1S_PHY_TC6(SPI, PIN_ETH_SS, PIN_ETH_RST, PIN_ETH_IRQ);
 
 static void OnPlcaStatus(bool success, bool plcaStatus) {
   if (!success) {
-    Serial.println("PLCA status register read failed");
+    Serial.print("PLCA status register read failed\n");
     return;
   }
 
   if (plcaStatus)
-    Serial.println("PLCA Mode active");
+    Serial.print("PLCA Mode active\n");
   else {
-    Serial.println("CSMA/CD fallback");
+    Serial.print("CSMA/CD fallback\n");
     t1s_phy.enablePlca();
   }
 }
@@ -26,7 +26,7 @@ void initPhy() {
                   FALLING);
 
   if (!t1s_io.begin()) {
-    Serial.println("'TC6_Io::begin(...)' failed.");
+    Serial.print("'TC6_Io::begin(...)' failed.\n");
     for (;;) { }
   }
 
@@ -40,7 +40,7 @@ void initPhy() {
     PHY_T1S_PLCA_SETTINGS,
     PHY_T1S_DEFAULT_MAC_SETTINGS
   )) {
-    Serial.println("'TC6::begin(...)' failed.");
+    Serial.print("'TC6::begin(...)' failed.\n");
     for (;;) { }
   }
 
@@ -60,6 +60,6 @@ void servicePhy() {
   if ((now - prev_beacon_check) > 1000) {
     prev_beacon_check = now;
     if (!t1s_phy.getPlcaStatus(OnPlcaStatus))
-      Serial.println("getPlcaStatus(...) failed");
+      Serial.print("getPlcaStatus(...) failed\n");
   }
 }
