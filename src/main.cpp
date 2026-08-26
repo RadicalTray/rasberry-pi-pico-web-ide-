@@ -446,6 +446,7 @@ void run_lua(String code) {
 }
 
 // --- HTML GUI ---
+// TODO: just put this in data/ and use LittleFS
 const char index_html[] PROGMEM = R"rawliteral(
 <!doctype html>
 <html>
@@ -771,13 +772,8 @@ const char index_html[] PROGMEM = R"rawliteral(
         display: flex;
         gap: 10px;
         align-items: center;
-      }
-      .pin-group-label {
-        font-size: 10px;
-        font-weight: 700;
-        color: #9333ea;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+        margin-left: 20px;
+        margin-right: 20px;
       }
       .pin-indicator {
         display: flex;
@@ -873,14 +869,12 @@ const char index_html[] PROGMEM = R"rawliteral(
           >
           <div id="status-light"></div>
           <div id="pinStatus">
-            <div class="pin-group-label">D</div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-D0"></div><div class="pin-name">D0</div><div class="pin-mode" id="pinMode-D0">-</div><div class="pin-val" id="pinVal-D0">-</div></div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-D1"></div><div class="pin-name">D1</div><div class="pin-mode" id="pinMode-D1">-</div><div class="pin-val" id="pinVal-D1">-</div></div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-D2"></div><div class="pin-name">D2</div><div class="pin-mode" id="pinMode-D2">-</div><div class="pin-val" id="pinVal-D2">-</div></div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-D3"></div><div class="pin-name">D3</div><div class="pin-mode" id="pinMode-D3">-</div><div class="pin-val" id="pinVal-D3">-</div></div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-D4"></div><div class="pin-name">D4</div><div class="pin-mode" id="pinMode-D4">-</div><div class="pin-val" id="pinVal-D4">-</div></div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-D5"></div><div class="pin-name">D5</div><div class="pin-mode" id="pinMode-D5">-</div><div class="pin-val" id="pinVal-D5">-</div></div>
-            <div class="pin-group-label" style="margin-left: 6px">A</div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-A0"></div><div class="pin-name">A0</div><div class="pin-mode" id="pinMode-A0">-</div><div class="pin-val" id="pinVal-A0">-</div></div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-A1"></div><div class="pin-name">A1</div><div class="pin-mode" id="pinMode-A1">-</div><div class="pin-val" id="pinVal-A1">-</div></div>
             <div class="pin-indicator"><div class="pin-dot" id="pin-A2"></div><div class="pin-name">A2</div><div class="pin-mode" id="pinMode-A2">-</div><div class="pin-val" id="pinVal-A2">-</div></div>
@@ -1708,7 +1702,15 @@ void loopPhy(void *params) {
 
 void setup() {
     Serial.begin(115200);
+
     // while (!Serial) {}
+
+    // analogRead() returns 0 on all of them
+    //
+    // for (int i = 0; i < 30; i++) {
+    //     pinMode(i, INPUT_PULLUP);
+    //     Serial.printf("%d = analog(%d), digital(%d)\n", i, analogRead(i), digitalRead(i));
+    // }
 
     LittleFS.begin();
 
