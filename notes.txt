@@ -1,0 +1,1 @@
+should earlephilhower's build core be able to warn that?

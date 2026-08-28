@@ -68,10 +68,10 @@ struct PinState {
     void dump() {
         Serial.print("Pin:\n");
         for (int i = 0; i < 6; i++) {
-            Serial.printf("\tD%d = %d\n", i, d[i]);
+            Serial.printf("\tD%d = %d\n", i, d[i].value);
         }
         for (int i = 0; i < 4; i++) {
-            Serial.printf("\tA%d = %d\n", i, a[i]);
+            Serial.printf("\tA%d = %d\n", i, a[i].value);
         }
     }
 };

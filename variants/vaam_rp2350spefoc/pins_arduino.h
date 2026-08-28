@@ -1,5 +1,5 @@
 #pragma once
-#define PICO_RP2350A __PICO_RP2350A
+#define PICO_RP2350A 1
 // Pin definitions for RP2350 SimpleFOC + SPE
 
 // Motor
