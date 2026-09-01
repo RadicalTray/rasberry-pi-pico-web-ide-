@@ -816,6 +816,65 @@ const char index_html[] PROGMEM = R"rawliteral(
         letter-spacing: 0.3px;
         text-transform: uppercase;
       }
+      .chat-popup {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 380px;
+        height: 100vh;
+        background: #fff;
+        border-left: 2px solid #fbcfe8;
+        display: flex;
+        flex-direction: column;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        z-index: 2000;
+        box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
+      }
+      .chat-popup.open {
+        transform: translateX(0);
+      }
+      .chat-topbar {
+        padding: 12px 20px;
+        background: linear-gradient(90deg, #fff0f6 0%, #f3f0ff 100%);
+        border-bottom: 2px solid #fbcfe8;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .chat-topbar-title {
+        font-weight: 700;
+        font-size: 15px;
+        color: #7c3aed;
+      }
+      .chat-topbar .btn {
+        font-size: 12px;
+        padding: 6px 14px;
+      }
+      .chat-input {
+        width: 100%;
+        padding: 12px 16px;
+        border: none;
+        border-bottom: 2px solid #f3e8ff;
+        font-size: 14px;
+        outline: none;
+        box-sizing: border-box;
+        font-family: system-ui, sans-serif;
+      }
+      .chat-output {
+        flex: 1;
+        padding: 16px;
+        font-family: monospace;
+        font-size: 13px;
+        color: #4c1d95;
+        background: #fafaf9;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        line-height: 1.5;
+        border: none;
+        resize: none;
+        outline: none;
+      }
     </style>
   </head>
   <body>
@@ -840,16 +899,66 @@ const char index_html[] PROGMEM = R"rawliteral(
       </div>
       <div id="fileList" class="file-list"></div>
       <div id="pinStatus">
-        <div class="pin-indicator"><div class="pin-dot" id="pin-D0"></div><div class="pin-name">D0</div><div class="pin-mode" id="pinMode-D0">-</div><div class="pin-val" id="pinVal-D0">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-D1"></div><div class="pin-name">D1</div><div class="pin-mode" id="pinMode-D1">-</div><div class="pin-val" id="pinVal-D1">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-D2"></div><div class="pin-name">D2</div><div class="pin-mode" id="pinMode-D2">-</div><div class="pin-val" id="pinVal-D2">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-D3"></div><div class="pin-name">D3</div><div class="pin-mode" id="pinMode-D3">-</div><div class="pin-val" id="pinVal-D3">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-D4"></div><div class="pin-name">D4</div><div class="pin-mode" id="pinMode-D4">-</div><div class="pin-val" id="pinVal-D4">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-D5"></div><div class="pin-name">D5</div><div class="pin-mode" id="pinMode-D5">-</div><div class="pin-val" id="pinVal-D5">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-A0"></div><div class="pin-name">A0</div><div class="pin-mode" id="pinMode-A0">-</div><div class="pin-val" id="pinVal-A0">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-A1"></div><div class="pin-name">A1</div><div class="pin-mode" id="pinMode-A1">-</div><div class="pin-val" id="pinVal-A1">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-A2"></div><div class="pin-name">A2</div><div class="pin-mode" id="pinMode-A2">-</div><div class="pin-val" id="pinVal-A2">-</div></div>
-        <div class="pin-indicator"><div class="pin-dot" id="pin-A3"></div><div class="pin-name">A3</div><div class="pin-mode" id="pinMode-A3">-</div><div class="pin-val" id="pinVal-A3">-</div></div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-D0"></div>
+          <div class="pin-name">D0</div>
+          <div class="pin-mode" id="pinMode-D0">-</div>
+          <div class="pin-val" id="pinVal-D0">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-D1"></div>
+          <div class="pin-name">D1</div>
+          <div class="pin-mode" id="pinMode-D1">-</div>
+          <div class="pin-val" id="pinVal-D1">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-D2"></div>
+          <div class="pin-name">D2</div>
+          <div class="pin-mode" id="pinMode-D2">-</div>
+          <div class="pin-val" id="pinVal-D2">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-D3"></div>
+          <div class="pin-name">D3</div>
+          <div class="pin-mode" id="pinMode-D3">-</div>
+          <div class="pin-val" id="pinVal-D3">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-D4"></div>
+          <div class="pin-name">D4</div>
+          <div class="pin-mode" id="pinMode-D4">-</div>
+          <div class="pin-val" id="pinVal-D4">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-D5"></div>
+          <div class="pin-name">D5</div>
+          <div class="pin-mode" id="pinMode-D5">-</div>
+          <div class="pin-val" id="pinVal-D5">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-A0"></div>
+          <div class="pin-name">A0</div>
+          <div class="pin-mode" id="pinMode-A0">-</div>
+          <div class="pin-val" id="pinVal-A0">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-A1"></div>
+          <div class="pin-name">A1</div>
+          <div class="pin-mode" id="pinMode-A1">-</div>
+          <div class="pin-val" id="pinVal-A1">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-A2"></div>
+          <div class="pin-name">A2</div>
+          <div class="pin-mode" id="pinMode-A2">-</div>
+          <div class="pin-val" id="pinVal-A2">-</div>
+        </div>
+        <div class="pin-indicator">
+          <div class="pin-dot" id="pin-A3"></div>
+          <div class="pin-name">A3</div>
+          <div class="pin-mode" id="pinMode-A3">-</div>
+          <div class="pin-val" id="pinVal-A3">-</div>
+        </div>
       </div>
     </div>
     <div class="main" id="mainContainer">
@@ -884,6 +993,13 @@ const char index_html[] PROGMEM = R"rawliteral(
           <div id="status-light"></div>
           <button class="btn btn-docs" onclick="openDocsModal()">
             API Docs
+          </button>
+          <button
+            class="btn btn-save"
+            onclick="toggleChat()"
+            id="chatToggleBtn"
+          >
+            Chat
           </button>
           <button class="btn btn-save" onclick="saveCode()">Save</button>
           <button class="btn btn-run" id="runBtn" onclick="runCode()">
@@ -1421,6 +1537,29 @@ const char index_html[] PROGMEM = R"rawliteral(
       </div>
     </div>
 
+    <div class="chat-popup" id="chatPopup">
+      <div class="chat-topbar">
+        <span class="chat-topbar-title">Chat</span>
+        <div style="display: flex; gap: 8px">
+          <button class="btn btn-run" onclick="sendChat()">Send</button>
+          <button class="btn btn-cancel" onclick="toggleChat()">Close</button>
+        </div>
+      </div>
+      <textarea
+        class="chat-output"
+        id="chatOutput"
+        readonly
+        placeholder="Response will appear here..."
+      >
+      </textarea>
+      <textarea
+        class="chat-input"
+        id="chatInput"
+        placeholder="Type a message... (Ctrl + Enter to send)"
+      >
+      </textarea>
+    </div>
+
     <script>
       let pinStatusWS;
       function connectPinStatusWS() {
@@ -1601,6 +1740,28 @@ const char index_html[] PROGMEM = R"rawliteral(
         document.getElementById("docsModal").classList.remove("show");
       }
 
+      function toggleChat() {
+        document.getElementById("chatPopup").classList.toggle("open");
+      }
+      function sendChat() {
+        const input = document.getElementById("chatInput");
+        const output = document.getElementById("chatOutput");
+        const text = input.value.trim();
+        if (!text) return;
+        output.value = "Sending...";
+        fetch("http://localhost:8282", {
+          method: "POST",
+          body: text,
+        })
+          .then((r) => r.text())
+          .then((t) => {
+            output.value = t;
+          })
+          .catch((err) => {
+            output.value = "Error: " + err.message;
+          });
+      }
+
       setInterval(() => {
         fetch("/poll")
           .then((r) => r.json())
@@ -1637,9 +1798,16 @@ const char index_html[] PROGMEM = R"rawliteral(
       }, 2000);
 
       window.onload = () => {
-        loadFile("/main.lua");
-        connectWS();
-        connectPinStatusWS();
+        try {
+          loadFile("/main.lua");
+          connectWS();
+          connectPinStatusWS();
+        } catch {}
+        document
+          .getElementById("chatInput")
+          .addEventListener("keydown", (e) => {
+            if (e.getModifierState("Control") && e.key === "Enter") sendChat();
+          });
       };
     </script>
   </body>

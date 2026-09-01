@@ -101,7 +101,8 @@ static void sendUpdate(PinState pinState) {
     String output;
     serializeJson(doc, output);
 
-    Serial.printf("Sending update: %s\n", output.c_str());
+    Serial.printf("Sending update\n");
+    // Serial.printf("Sending update: %s\n", output.c_str());
 
     pinWebSocket.broadcastTXT(output);
 }
@@ -127,7 +128,12 @@ static void pinWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, siz
     }
 }
 
-static void connectMqtt() {
+void initPinWebSocket() {
+    pinWebSocket.begin();
+    pinWebSocket.onEvent(pinWebSocketEvent);
+
+    mqttClient.begin("192.168.42.16", 1883, net);
+
     // No need to check for WiFi Status
     // WiFiClient's apparently just a glorified TCP wrapper
     // (source: some random ai)
@@ -139,14 +145,6 @@ static void connectMqtt() {
     Serial.print("MQTT connected!\n");
 }
 
-void initPinWebSocket() {
-    pinWebSocket.begin();
-    pinWebSocket.onEvent(pinWebSocketEvent);
-
-    mqttClient.begin("192.168.42.16", 1883, net);
-    connectMqtt();
-}
-
 void loopPinWebSocket() {
     static unsigned long prev = 0;
     auto now = millis();
@@ -155,9 +153,10 @@ void loopPinWebSocket() {
     mqttClient.loop();
 
     if (!mqttClient.connected()) {
-        Serial.print("MQTT Disconnected!\n");
         Serial.print("MQTT Reconnecting...\n");
-        connectMqtt();
+        if (mqttClient.connect("")) {
+            Serial.print("MQTT connected!\n");
+        }
     }
 
     if (now - prev > 1000) {
@@ -169,10 +168,12 @@ void loopPinWebSocket() {
             sendUpdate(currPinState);
         }
 
-        mqttClient.publish("A/0", String(currPinState.a[0].value));
-        mqttClient.publish("A/1", String(currPinState.a[1].value));
-        mqttClient.publish("A/2", String(currPinState.a[2].value));
-        mqttClient.publish("A/3", String(currPinState.a[3].value));
+        if (mqttClient.connected()) {
+            mqttClient.publish("A/0", String(currPinState.a[0].value));
+            mqttClient.publish("A/1", String(currPinState.a[1].value));
+            mqttClient.publish("A/2", String(currPinState.a[2].value));
+            mqttClient.publish("A/3", String(currPinState.a[3].value));
+        }
 
         // currPinState.dump();
     }
