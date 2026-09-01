@@ -2,8 +2,10 @@
 #include <ArduinoJson.h>
 #include <WebSocketsServer.h>
 #include <hardware/gpio.h>
+#include <WiFiClient.h>
+#include <MQTT.h>
 
-// NOTE: Does not work.
+// NOTE: Does not work. Probably cuz casting to uint32_t and & != casting to uint8_t and &
 // Get pin mode, stolen from https://github.com/arduino/ArduinoCore-API/issues/179
 //
 // On success returns: INPUT, INPUT_PULLUP, OUTPUT
@@ -80,6 +82,8 @@ static PinState prevPinState{};
 static PinState currPinState{};
 
 static WebSocketsServer pinWebSocket(82);
+static WiFiClient net;
+static MQTTClient mqttClient;
 
 static void sendUpdate(PinState pinState) {
     JsonDocument doc;
@@ -123,9 +127,24 @@ static void pinWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, siz
     }
 }
 
+static void connectMqtt() {
+    // No need to check for WiFi Status
+    // WiFiClient's apparently just a glorified TCP wrapper
+    // (source: some random ai)
+
+    while (!mqttClient.connect("")) {
+        Serial.print("MQTT connecting...\n");
+        delay(1000);
+    }
+    Serial.print("MQTT connected!\n");
+}
+
 void initPinWebSocket() {
     pinWebSocket.begin();
     pinWebSocket.onEvent(pinWebSocketEvent);
+
+    mqttClient.begin("192.168.42.16", 1883, net);
+    connectMqtt();
 }
 
 void loopPinWebSocket() {
@@ -133,6 +152,13 @@ void loopPinWebSocket() {
     auto now = millis();
 
     pinWebSocket.loop();
+    mqttClient.loop();
+
+    if (!mqttClient.connected()) {
+        Serial.print("MQTT Disconnected!\n");
+        Serial.print("MQTT Reconnecting...\n");
+        connectMqtt();
+    }
 
     if (now - prev > 1000) {
         prev = now;
@@ -143,6 +169,11 @@ void loopPinWebSocket() {
             sendUpdate(currPinState);
         }
 
-        currPinState.dump();
+        mqttClient.publish("A/0", String(currPinState.a[0].value));
+        mqttClient.publish("A/1", String(currPinState.a[1].value));
+        mqttClient.publish("A/2", String(currPinState.a[2].value));
+        mqttClient.publish("A/3", String(currPinState.a[3].value));
+
+        // currPinState.dump();
     }
 }

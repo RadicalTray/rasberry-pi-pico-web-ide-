@@ -770,23 +770,24 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
       #pinStatus {
         display: flex;
+        flex-direction: column;
         gap: 10px;
-        align-items: center;
-        margin-left: 20px;
-        margin-right: 20px;
+        align-items: left;
       }
       .pin-indicator {
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         align-items: center;
-        gap: 2px;
+        justify-content: space-evenly;
       }
       .pin-dot {
-        width: 8px;
-        height: 8px;
+        width: 24px;
+        height: 24px;
         border-radius: 50%;
         background: #d1d5db;
-        transition: background 0.2s, box-shadow 0.2s;
+        transition:
+          background 0.2s,
+          box-shadow 0.2s;
       }
       .pin-dot.high {
         background: #34d399;
@@ -796,18 +797,19 @@ const char index_html[] PROGMEM = R"rawliteral(
         background: #6b7280;
       }
       .pin-name {
-        font-size: 9px;
+        font-size: 18px;
         font-family: monospace;
         color: #6b7280;
         font-weight: 600;
       }
       .pin-val {
-        font-size: 9px;
+        font-size: 18px;
+        min-width: 64px;
         font-family: monospace;
         color: #9ca3af;
       }
       .pin-mode {
-        font-size: 8px;
+        font-size: 18px;
         font-family: monospace;
         color: #a78bfa;
         font-weight: 600;
@@ -819,8 +821,8 @@ const char index_html[] PROGMEM = R"rawliteral(
   <body>
     <div class="sidebar">
       <div class="sidebar-header">
-        <span>EXPLORER</span
-        ><button
+        <span>EXPLORER</span>
+        <button
           onclick="newFile()"
           style="
             background: #fff0f6;
@@ -837,6 +839,18 @@ const char index_html[] PROGMEM = R"rawliteral(
         </button>
       </div>
       <div id="fileList" class="file-list"></div>
+      <div id="pinStatus">
+        <div class="pin-indicator"><div class="pin-dot" id="pin-D0"></div><div class="pin-name">D0</div><div class="pin-mode" id="pinMode-D0">-</div><div class="pin-val" id="pinVal-D0">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-D1"></div><div class="pin-name">D1</div><div class="pin-mode" id="pinMode-D1">-</div><div class="pin-val" id="pinVal-D1">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-D2"></div><div class="pin-name">D2</div><div class="pin-mode" id="pinMode-D2">-</div><div class="pin-val" id="pinVal-D2">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-D3"></div><div class="pin-name">D3</div><div class="pin-mode" id="pinMode-D3">-</div><div class="pin-val" id="pinVal-D3">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-D4"></div><div class="pin-name">D4</div><div class="pin-mode" id="pinMode-D4">-</div><div class="pin-val" id="pinVal-D4">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-D5"></div><div class="pin-name">D5</div><div class="pin-mode" id="pinMode-D5">-</div><div class="pin-val" id="pinVal-D5">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-A0"></div><div class="pin-name">A0</div><div class="pin-mode" id="pinMode-A0">-</div><div class="pin-val" id="pinVal-A0">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-A1"></div><div class="pin-name">A1</div><div class="pin-mode" id="pinMode-A1">-</div><div class="pin-val" id="pinVal-A1">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-A2"></div><div class="pin-name">A2</div><div class="pin-mode" id="pinMode-A2">-</div><div class="pin-val" id="pinVal-A2">-</div></div>
+        <div class="pin-indicator"><div class="pin-dot" id="pin-A3"></div><div class="pin-name">A3</div><div class="pin-mode" id="pinMode-A3">-</div><div class="pin-val" id="pinVal-A3">-</div></div>
+      </div>
     </div>
     <div class="main" id="mainContainer">
       <div class="header">
@@ -868,18 +882,6 @@ const char index_html[] PROGMEM = R"rawliteral(
             >Idle</span
           >
           <div id="status-light"></div>
-          <div id="pinStatus">
-            <div class="pin-indicator"><div class="pin-dot" id="pin-D0"></div><div class="pin-name">D0</div><div class="pin-mode" id="pinMode-D0">-</div><div class="pin-val" id="pinVal-D0">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-D1"></div><div class="pin-name">D1</div><div class="pin-mode" id="pinMode-D1">-</div><div class="pin-val" id="pinVal-D1">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-D2"></div><div class="pin-name">D2</div><div class="pin-mode" id="pinMode-D2">-</div><div class="pin-val" id="pinVal-D2">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-D3"></div><div class="pin-name">D3</div><div class="pin-mode" id="pinMode-D3">-</div><div class="pin-val" id="pinVal-D3">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-D4"></div><div class="pin-name">D4</div><div class="pin-mode" id="pinMode-D4">-</div><div class="pin-val" id="pinVal-D4">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-D5"></div><div class="pin-name">D5</div><div class="pin-mode" id="pinMode-D5">-</div><div class="pin-val" id="pinVal-D5">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-A0"></div><div class="pin-name">A0</div><div class="pin-mode" id="pinMode-A0">-</div><div class="pin-val" id="pinVal-A0">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-A1"></div><div class="pin-name">A1</div><div class="pin-mode" id="pinMode-A1">-</div><div class="pin-val" id="pinVal-A1">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-A2"></div><div class="pin-name">A2</div><div class="pin-mode" id="pinMode-A2">-</div><div class="pin-val" id="pinVal-A2">-</div></div>
-            <div class="pin-indicator"><div class="pin-dot" id="pin-A3"></div><div class="pin-name">A3</div><div class="pin-mode" id="pinMode-A3">-</div><div class="pin-val" id="pinVal-A3">-</div></div>
-          </div>
           <button class="btn btn-docs" onclick="openDocsModal()">
             API Docs
           </button>
@@ -1422,10 +1424,12 @@ const char index_html[] PROGMEM = R"rawliteral(
     <script>
       let pinStatusWS;
       function connectPinStatusWS() {
-        pinStatusWS = new WebSocket("ws://" + location.hostname + ":82/", [ "arduino" ]);
+        pinStatusWS = new WebSocket("ws://" + location.hostname + ":82/", [
+          "arduino",
+        ]);
         pinStatusWS.onopen = function () {};
         pinStatusWS.onclose = function () {
-          setTimeout(function() {
+          setTimeout(function () {
             connectPinStatusWS();
           }, 2000);
         };
@@ -1436,9 +1440,18 @@ const char index_html[] PROGMEM = R"rawliteral(
         const modeLabels = ["IN", "OUT"];
         pinStatusWS.onmessage = function (e) {
           const pins = JSON.parse(e.data);
-          console.log("Server: ", pins);
-
-          const pinNames = ["A0","A1","A2","A3","D0","D1","D2","D3","D4","D5"];
+          const pinNames = [
+            "A0",
+            "A1",
+            "A2",
+            "A3",
+            "D0",
+            "D1",
+            "D2",
+            "D3",
+            "D4",
+            "D5",
+          ];
           pinNames.forEach(function (name) {
             const pin = pins[name];
             if (pin !== undefined) {
@@ -1452,7 +1465,7 @@ const char index_html[] PROGMEM = R"rawliteral(
                 val.innerText = pin.value;
               }
               if (mode) {
-                mode.innerText = modeLabels[pin.mode] || ("M" + pin.mode);
+                mode.innerText = modeLabels[pin.mode] || "M" + pin.mode;
               }
             }
           });
@@ -1703,14 +1716,7 @@ void loopPhy(void *params) {
 void setup() {
     Serial.begin(115200);
 
-    // while (!Serial) {}
-
-    // analogRead() returns 0 on all of them
-    //
-    // for (int i = 0; i < 30; i++) {
-    //     pinMode(i, INPUT_PULLUP);
-    //     Serial.printf("%d = analog(%d), digital(%d)\n", i, analogRead(i), digitalRead(i));
-    // }
+    while (!Serial) {}
 
     LittleFS.begin();
 
@@ -1749,17 +1755,16 @@ void setup() {
     server.begin();
     webSocket.begin();
     webSocket.onEvent(webSocketEvent);
-
     initPinWebSocket();
 }
 
 void loop() {
     server.handleClient();
     webSocket.loop();
+    loopPinWebSocket();
     if (run_requested) {
         run_requested = false;
         delay(50);
         run_lua(lua_code_pending);
     }
-    loopPinWebSocket();
 }

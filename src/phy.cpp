@@ -11,10 +11,10 @@ static void OnPlcaStatus(bool success, bool plcaStatus) {
     return;
   }
 
-  if (plcaStatus)
-    Serial.print("PLCA Mode active\n");
-  else {
-    Serial.print("CSMA/CD fallback\n");
+  if (plcaStatus) {
+    // Serial.print("PLCA Mode active\n");
+  } else {
+    // Serial.print("CSMA/CD fallback\n");
     t1s_phy.enablePlca();
   }
 }
