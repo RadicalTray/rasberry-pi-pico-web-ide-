@@ -809,12 +809,14 @@ const char index_html[] PROGMEM = R"rawliteral(
         color: #9ca3af;
       }
       .pin-mode {
-        font-size: 18px;
+        min-width: 48px;
+        font-size: 12px;
         font-family: monospace;
         color: #a78bfa;
         font-weight: 600;
         letter-spacing: 0.3px;
         text-transform: uppercase;
+        text-align: left;
       }
       .chat-popup {
         position: fixed;
@@ -1183,16 +1185,16 @@ const char index_html[] PROGMEM = R"rawliteral(
                 Configures the input/output mode of a GPIO pin.
               </div>
               <div class="api-params">
-                <span class="api-param-item"
-                  ><span class="api-param-name">pin</span>
-                  <span class="api-param-type">number</span> - GPIO pin
-                  number</span
-                >
-                <span class="api-param-item"
-                  ><span class="api-param-name">mode</span>
-                  <span class="api-param-type">number</span> - Mode (INPUT,
-                  OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)</span
-                >
+                <span class="api-param-item">
+                  <span class="api-param-name">pin</span>
+                  <span class="api-param-type">number</span>
+                  - GPIO pin number
+                </span>
+                <span class="api-param-item">
+                  <span class="api-param-name">mode</span>
+                  <span class="api-param-type">number</span>
+                  - Mode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)
+                </span>
               </div>
             </div>
 
@@ -1454,24 +1456,25 @@ const char index_html[] PROGMEM = R"rawliteral(
                 Draws a circle outline with specified radius.
               </div>
               <div class="api-params">
-                <span class="api-param-item"
-                  ><span class="api-param-name">x</span>,
+                <span class="api-param-item">
+                  <span class="api-param-name">x</span>,
                   <span class="api-param-name">y</span>
                   <span class="api-param-type">number</span> - Center
-                  coordinates</span
-                >
-                <span class="api-param-item"
-                  ><span class="api-param-name">radius</span>
-                  <span class="api-param-type">number</span> - Circle
-                  radius</span
-                >
-                <span class="api-param-item"
-                  ><span class="api-param-name">r</span>,
-                  <span class="api-param-name">g</span>,
+                  coordinates
+                </span>
+                <span class="api-param-item">
+                  <span class="api-param-name">radius</span>
+                  <span class="api-param-type">number</span> - Circle radius
+                </span>
+                <span class="api-param-item">
+                  <span class="api-param-name">r</span>
+                  ,
+                  <span class="api-param-name">g</span>
+                  ,
                   <span class="api-param-name">b</span>
-                  <span class="api-param-type">number</span> - RGB components
-                  (0-255)</span
-                >
+                  <span class="api-param-type">number</span>
+                  - RGB components (0-255)
+                </span>
               </div>
             </div>
 
@@ -1489,18 +1492,20 @@ const char index_html[] PROGMEM = R"rawliteral(
                   <span class="api-param-type">number</span> - Center
                   coordinates</span
                 >
-                <span class="api-param-item"
-                  ><span class="api-param-name">radius</span>
-                  <span class="api-param-type">number</span> - Circle
-                  radius</span
-                >
-                <span class="api-param-item"
-                  ><span class="api-param-name">r</span>,
-                  <span class="api-param-name">g</span>,
+                <span class="api-param-item">
+                  <span class="api-param-name">radius</span>
+                  <span class="api-param-type">number</span>
+                  - Circle radius
+                </span>
+                <span class="api-param-item">
+                  <span class="api-param-name">r</span>
+                  ,
+                  <span class="api-param-name">g</span>
+                  ,
                   <span class="api-param-name">b</span>
-                  <span class="api-param-type">number</span> - RGB components
-                  (0-255)</span
-                >
+                  <span class="api-param-type">number</span>
+                  - RGB components (0-255)
+                </span>
               </div>
             </div>
 
@@ -1576,7 +1581,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           console.log("WebSocket Error ", error);
           pinStatus.close();
         };
-        const modeLabels = ["IN", "OUT"];
+        const modeLabels = ["IN", "OUT", "IN_PU", "IN_PD"];
         pinStatusWS.onmessage = function (e) {
           const pins = JSON.parse(e.data);
           const pinNames = [

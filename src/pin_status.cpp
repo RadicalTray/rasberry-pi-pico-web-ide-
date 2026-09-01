@@ -5,22 +5,28 @@
 #include <WiFiClient.h>
 #include <MQTT.h>
 
-// NOTE: Does not work. Probably cuz casting to uint32_t and & != casting to uint8_t and &
-// Get pin mode, stolen from https://github.com/arduino/ArduinoCore-API/issues/179
-//
-// On success returns: INPUT, INPUT_PULLUP, OUTPUT
-// On invalid pins returns: -1
-// static int getPinMode(uint8_t pin) {
-//     if (pin >= NUM_DIGITAL_PINS) return (-1);
-//
-//     uint8_t bit = digitalPinToBitMask(pin);
-//     uint8_t port = digitalPinToPort(pin);
-//     volatile uint8_t *reg = portModeRegister(port);
-//     if (*reg & bit) return (OUTPUT);
-//
-//     volatile uint8_t *out = portOutputRegister(port);
-//     return ((*out & bit) ? INPUT_PULLUP : INPUT);
-// }
+static int getPinMode(uint8_t pin) {
+    if (pin >= NUM_DIGITAL_PINS) return -1;
+
+    auto io = pads_bank0_hw->io[pin];
+    bool output = gpio_is_dir_out(pin);
+    bool pullup = io & (1 << PADS_BANK0_GPIO0_PUE_LSB) ? true : false;
+    bool pulldown = io & (1 << PADS_BANK0_GPIO0_PDE_LSB) ? true : false;
+
+    if (output) {
+        // fun fact: it's also pulldown
+        return OUTPUT;
+    } else if (pullup == false && pulldown == false) {
+        return INPUT;
+    } else if (pullup == true && pulldown == false) {
+        return INPUT_PULLUP;
+    } else if (pullup == false && pulldown == true) {
+        return INPUT_PULLDOWN;
+    } else {
+        // pullup + pulldown is "bus_keep" mode or something
+        return -1;
+    }
+}
 
 struct PinInfo {
     int mode;
@@ -45,12 +51,12 @@ struct PinState {
     void poll() {
         for (int i = 0; i < 6; i++) {
             int pin = 20 + i;
-            this->d[i].mode = gpio_is_dir_out(pin) ? 1 : 0;
+            this->d[i].mode = getPinMode(pin);
             this->d[i].value = digitalRead(pin);
         }
         for (int i = 0; i < 4; i++) {
             int pin = 26 + i;
-            this->a[i].mode = gpio_is_dir_out(pin) ? 1 : 0;
+            this->a[i].mode = getPinMode(pin);
             this->a[i].value = analogRead(pin);
         }
     }
