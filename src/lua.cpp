@@ -2,7 +2,7 @@
 #include <ArduinoJson.h>
 #include <WebSocketsServer.h>
 #include <WiFiClient.h>
-#include <HttpClient.h>
+#include <HTTPClient.h>
 #include <lua/lua.hpp>
 
 const String testJson = R"---({"id":"chatcmpl-8d6d2cff624cebd2","object":"chat.completion","created":1788526612,"model":"/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello! How can I help you today?","refusal":null,"annotations":null,"audio":null,"function_call":null,"reasoning":"Here's a thinking process:\n\n1.  **Analyze User Input:** The user said \"Hello!\" which is a standard greeting.\n2.  **Identify Intent:** The user is initiating a conversation.\n3.  **Determine Response:** I should respond with a friendly greeting, acknowledge the user, and offer assistance. I'll keep it simple and polite.\n4.  **Formulate Response:** \"Hello! How can I help you today?\" or similar.\n5.  **Check Constraints:** No specific constraints mentioned. Just say hello back and offer help.\n6.  **Final Output Generation:** \"Hello! How can I help you today?\" (or very similar)✅"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null,"routed_experts":null}],"service_tier":null,"system_fingerprint":"vllm-0.26.1rc1.dev1046+gba07e4a48-a9934369","usage":{"prompt_tokens":18,"total_tokens":172,"completion_tokens":154,"prompt_tokens_details":null,"completion_tokens_details":{"reasoning_tokens":143}},"prompt_logprobs":null,"prompt_token_ids":null,"prompt_text":null,"kv_transfer_params":null,"ec_transfer_params":null,"metrics":null}})---";
@@ -301,83 +301,84 @@ bool luaIsRunning() {
     return runningLua != nullptr;
 }
 
-static int readResponse(HttpClient &client) {
-    int statusCode = client.responseStatusCode();
-    Serial.printf("Status code: %d\n", statusCode);
+// TODO: use framework-arduinopico's HTTPClient
+// static int readResponse(HTTPClient &client) {
+//     int statusCode = client.responseStatusCode();
+//     Serial.printf("Status code: %d\n", statusCode);
+//
+//     Serial.print("Headers:\n");
+//     while (client.headerAvailable()) {
+//       String name = client.readHeaderName();
+//       String value = client.readHeaderValue();
+//       Serial.printf("\t%s: %s\n", name.c_str(), value.c_str());
+//     }
+//
+//     auto contentLen = client.contentLength();
+//     if (contentLen == HTTPClient::kNoContentLengthHeader) {
+//       Serial.print("Response content length is unknown.\n");
+//     } else {
+//       Serial.printf("Response content length = %d\n", contentLen);
+//     }
+//
+//     if (client.isResponseChunked()) {
+//       Serial.print("Response is chunked.\n");
+//     }
+//
+//     int emptyRes = 0;
+//     while (true) {
+//       String response = client.responseBody();
+//       Serial.println("Response: " + response);
+//
+//       if (response == "") {
+//         emptyRes += 1;
+//       } else {
+//         emptyRes = 0;
+//       }
+//
+//       if (client.completed()) {
+//         Serial.println("Completed!");
+//         return 0;
+//       }
+//
+//       if (emptyRes > 5) {
+//         Serial.println("Server return empty response more than 5 times, stopping...");
+//         return 0;
+//       }
+//     }
+// }
 
-    Serial.print("Headers:\n");
-    while (client.headerAvailable()) {
-      String name = client.readHeaderName();
-      String value = client.readHeaderValue();
-      Serial.printf("\t%s: %s\n", name.c_str(), value.c_str());
-    }
-
-    auto contentLen = client.contentLength();
-    if (contentLen == HttpClient::kNoContentLengthHeader) {
-      Serial.print("Response content length is unknown.\n");
-    } else {
-      Serial.printf("Response content length = %d\n", contentLen);
-    }
-
-    if (client.isResponseChunked()) {
-      Serial.print("Response is chunked.\n");
-    }
-
-    int emptyRes = 0;
-    while (true) {
-      String response = client.responseBody();
-      Serial.println("Response: " + response);
-
-      if (response == "") {
-        emptyRes += 1;
-      } else {
-        emptyRes = 0;
-      }
-
-      if (client.completed()) {
-        Serial.println("Completed!");
-        return 0;
-      }
-
-      if (emptyRes > 5) {
-        Serial.println("Server return empty response more than 5 times, stopping...");
-        return 0;
-      }
-    }
-}
-
-static void testHttpStuff() {
-    const auto endpoint = "/v1/chat/completions";
-    const auto contentType = "application/json";
-    const auto hello = R"---({"model": "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", "messages": [{"role": "user", "content": "Hello!"}], "stream": false})---";
-    const auto meow = R"---({"model": "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", "messages": [{"role": "user", "content": "Meow!"}], "stream": false})---";
-    int err = 0;
-
-    Serial.print("--- READING 1ST REQUEST ---\n");
-    HttpClient req1(net, "vaam01.3bbddns.com", 43954);
-    err = req1.post(endpoint, contentType, hello);
-    if (err) {
-      Serial.printf("Failed to send http post: %d\n", err);
-      while (true) {}
-    }
-
-    Serial.print("--- READING 2ND REQUEST ---\n");
-    HttpClient req2(net, "vaam01.3bbddns.com", 43954);
-    err = req2.post(endpoint, contentType, meow);
-    if (err) {
-      Serial.printf("Failed to send http post: %d\n", err);
-      while (true) {}
-    }
-
-    Serial.print("--- READING 2ND RESPONSE ---\n");
-    readResponse(req2);
-
-    Serial.print("--- READING 1ST RESPONSE ---\n");
-    readResponse(req1);
-
-    Serial.print("Stopping...\n");
-    while (true) {}
-}
+// static void testHttpStuff() {
+//     const auto endpoint = "/v1/chat/completions";
+//     const auto contentType = "application/json";
+//     const auto hello = R"---({"model": "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", "messages": [{"role": "user", "content": "Hello!"}], "stream": false})---";
+//     const auto meow = R"---({"model": "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", "messages": [{"role": "user", "content": "Meow!"}], "stream": false})---";
+//     int err = 0;
+//
+//     Serial.print("--- READING 1ST REQUEST ---\n");
+//     HTTPClient req1(net, "vaam01.3bbddns.com", 43954);
+//     err = req1.post(endpoint, contentType, hello);
+//     if (err) {
+//       Serial.printf("Failed to send http post: %d\n", err);
+//       while (true) {}
+//     }
+//
+//     Serial.print("--- READING 2ND REQUEST ---\n");
+//     HTTPClient req2(net, "vaam01.3bbddns.com", 43954);
+//     err = req2.post(endpoint, contentType, meow);
+//     if (err) {
+//       Serial.printf("Failed to send http post: %d\n", err);
+//       while (true) {}
+//     }
+//
+//     Serial.print("--- READING 2ND RESPONSE ---\n");
+//     readResponse(req2);
+//
+//     Serial.print("--- READING 1ST RESPONSE ---\n");
+//     readResponse(req1);
+//
+//     Serial.print("Stopping...\n");
+//     while (true) {}
+// }
 
 void doLuaStuff() {
     runLua("print(agentic.send('hello'))");

@@ -2,7 +2,6 @@
 #include <LittleFS.h>
 #include <WebServer.h>
 #include <FreeRTOS.h>
-#include <HttpClient.h>
 #include <WiFiClient.h>
 
 #include "lua.hpp"
