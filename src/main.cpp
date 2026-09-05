@@ -939,7 +939,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           pinStatus.close();
         };
         statusWebSocket.onmessage = (e) => {
-          const pins = JSON.parse(e.data);
+          const data = JSON.parse(e.data);
           const pinNames = [
             "A0",
             "A1",
@@ -953,7 +953,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             "D5",
           ];
           pinNames.forEach(function (name) {
-            const pin = pins[name];
+            const pin = data[name];
             if (pin !== undefined) {
               const dot = document.getElementById("pin-" + name);
               const val = document.getElementById("pinVal-" + name);
@@ -987,10 +987,10 @@ const char index_html[] PROGMEM = R"rawliteral(
           }
 
           // FIXME
-          if (data.logs && !isWsConnected) {
-            term.innerText += data.logs;
-            term.scrollTop = term.scrollHeight;
-          }
+          // if (data.logs && !isWsConnected) {
+          //   term.innerText += data.logs;
+          //   term.scrollTop = term.scrollHeight;
+          // }
         };
       }
 
@@ -1177,7 +1177,11 @@ void handleRead() {
 void handleUpload() {
     String path = server.arg("path"); if (path == "") path = "/main.lua";
     File f = LittleFS.open(path, "w");
-    if (f) { f.print(server.arg("plain")); f.close(); server.send(200, "text/plain", "Saved"); }
+    if (f) {
+      f.print(server.arg("plain"));
+      f.close();
+      server.send(200, "text/plain", "Saved");
+    }
     else server.send(500, "text/plain", "Error");
 }
 
@@ -1212,61 +1216,16 @@ void handleStop() {
     server.send(200, "text/plain", "Stop Issued");
 }
 
-int readResponse(HttpClient &client) {
-    int statusCode = client.responseStatusCode();
-    Serial.printf("Status code: %d\n", statusCode);
-
-    Serial.print("Headers:\n");
-    while (client.headerAvailable()) {
-      String name = client.readHeaderName();
-      String value = client.readHeaderValue();
-      Serial.printf("\t%s: %s\n", name.c_str(), value.c_str());
-    }
-
-    auto contentLen = client.contentLength();
-    if (contentLen == HttpClient::kNoContentLengthHeader) {
-      Serial.print("Response content length is unknown.\n");
-    } else {
-      Serial.printf("Response content length = %d\n", contentLen);
-    }
-
-    if (client.isResponseChunked()) {
-      Serial.print("Response is chunked.\n");
-    }
-
-    int emptyRes = 0;
-    while (true) {
-      String response = client.responseBody();
-      Serial.println("Response: " + response);
-
-      if (response == "") {
-        emptyRes += 1;
-      } else {
-        emptyRes = 0;
-      }
-
-      if (client.completed()) {
-        Serial.println("Completed!");
-        return 0;
-      }
-
-      if (emptyRes > 5) {
-        Serial.println("Server return empty response more than 5 times, stopping...");
-        return 0;
-      }
-    }
-}
-
 void setup() {
     Serial.begin(115200);
     while (!Serial) {}
 
     doLuaStuff();
-    Serial.print("Stopping...\n");
-    while (true) {}
 
     LittleFS.begin();
 
+    // FIXME: EMERGENCY, IMPLEMENT ARDUINO_10BASE_T1S SERVICE ROUTINE CORRECTLY
+    //  check framework-arduinopico/libraries/lwIP_USB_NCM for implementation maybe
     setupNetwork();
 
     initStatus();
@@ -1280,6 +1239,8 @@ void setup() {
     server.on("/run", HTTP_POST, handleRun);
     server.on("/stop", HTTP_POST, handleStop);
     server.begin();
+
+    initLua();
 }
 
 void loop() {

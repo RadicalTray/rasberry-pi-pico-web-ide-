@@ -67,6 +67,6 @@ void servicePhy() {
 void loopPhy(void *params) {
     while (true) {
         servicePhy();
-        delay(100);
+        yield();
     }
 }

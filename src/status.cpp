@@ -121,7 +121,7 @@ void initStatus() {
     pinWebSocket.begin();
     pinWebSocket.onEvent(pinWebSocketEvent);
 
-    mqttClient.begin("192.168.42.16", 1883, net);
+    mqttClient.begin("192.168.42.1", 1883, net);
 
     // No need to check for WiFi Status
     // WiFiClient's apparently just a glorified TCP wrapper
@@ -145,8 +145,6 @@ void loopStatus() {
         Serial.print("MQTT Reconnecting...\n");
         if (mqttClient.connect("")) {
             Serial.print("MQTT connected!\n");
-        } else {
-            return;
         }
     }
 

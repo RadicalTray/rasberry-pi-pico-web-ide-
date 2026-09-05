@@ -875,7 +875,7 @@
           pinStatus.close();
         };
         statusWebSocket.onmessage = (e) => {
-          const pins = JSON.parse(e.data);
+          const data = JSON.parse(e.data);
           const pinNames = [
             "A0",
             "A1",
@@ -889,7 +889,7 @@
             "D5",
           ];
           pinNames.forEach(function (name) {
-            const pin = pins[name];
+            const pin = data[name];
             if (pin !== undefined) {
               const dot = document.getElementById("pin-" + name);
               const val = document.getElementById("pinVal-" + name);
@@ -923,10 +923,10 @@
           }
 
           // FIXME
-          if (data.logs && !isWsConnected) {
-            term.innerText += data.logs;
-            term.scrollTop = term.scrollHeight;
-          }
+          // if (data.logs && !isWsConnected) {
+          //   term.innerText += data.logs;
+          //   term.scrollTop = term.scrollHeight;
+          // }
         };
       }
 

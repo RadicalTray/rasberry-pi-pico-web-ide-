@@ -5,6 +5,8 @@
 #include <HttpClient.h>
 #include <lua/lua.hpp>
 
+const String testJson = R"---({"id":"chatcmpl-8d6d2cff624cebd2","object":"chat.completion","created":1788526612,"model":"/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello! How can I help you today?","refusal":null,"annotations":null,"audio":null,"function_call":null,"reasoning":"Here's a thinking process:\n\n1.  **Analyze User Input:** The user said \"Hello!\" which is a standard greeting.\n2.  **Identify Intent:** The user is initiating a conversation.\n3.  **Determine Response:** I should respond with a friendly greeting, acknowledge the user, and offer assistance. I'll keep it simple and polite.\n4.  **Formulate Response:** \"Hello! How can I help you today?\" or similar.\n5.  **Check Constraints:** No specific constraints mentioned. Just say hello back and offer help.\n6.  **Final Output Generation:** \"Hello! How can I help you today?\" (or very similar)✅"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null,"routed_experts":null}],"service_tier":null,"system_fingerprint":"vllm-0.26.1rc1.dev1046+gba07e4a48-a9934369","usage":{"prompt_tokens":18,"total_tokens":172,"completion_tokens":154,"prompt_tokens_details":null,"completion_tokens_details":{"reasoning_tokens":143}},"prompt_logprobs":null,"prompt_token_ids":null,"prompt_text":null,"kv_transfer_params":null,"ec_transfer_params":null,"metrics":null}})---";
+
 // random json debugging utils
 static void printTabs(int tab);
 static void printValue(int tab, const JsonVariant &value);
@@ -18,6 +20,8 @@ static lua_State *runningLua = nullptr;
 static void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {}
 
 static void sendError(String errmsg) {
+    Serial.printf("Lua error: %s\n", errmsg.c_str());
+
     JsonDocument doc;
     doc["type"] = "error";
     doc["data"] = errmsg;
@@ -29,6 +33,8 @@ static void sendError(String errmsg) {
 }
 
 static void sendData(String data) {
+    Serial.printf("Lua data: %s\n", data.c_str());
+
     JsonDocument doc;
     doc["type"] = "data";
     doc["data"] = data;
@@ -39,7 +45,67 @@ static void sendData(String data) {
     luaWebSocket.broadcastTXT(output);
 }
 
-// TODO
+// static void luaTableToJson() {
+//     switch (lua_type(x)) {
+//         case integer:
+//             break;
+//         case number:
+//             break;
+//         case table:
+//             break;
+//     }
+// }
+//
+// static void luaArrayToJson() {
+// }
+
+static void pushJsonVariant(lua_State *L, const JsonVariant &value);
+static void pushJsonArray(lua_State *L, const JsonArray &arr);
+static void pushJsonObject(lua_State *L, const JsonObject &obj);
+
+static void pushJsonVariant(lua_State *L, const JsonVariant &value) {
+    if (value.isNull()) {
+        lua_pushnil(L);
+    } else if (value.is<long long>()) { // must be before float
+        lua_pushinteger(L, value.as<long long>());
+    } else if (value.is<double>()) { // must be after int
+        lua_pushnumber(L, value.as<double>());
+    } else if (value.is<const char*>()) {
+        lua_pushstring(L, value.as<const char*>());
+    } else if (value.is<bool>()) {
+        lua_pushboolean(L, value.as<bool>());
+    } else if (value.is<JsonArray>()) {
+        pushJsonArray(L, value.as<JsonArray>());
+    } else if (value.is<JsonObject>()) {
+        pushJsonObject(L, value.as<JsonObject>());
+    } else {
+        // unreachable
+    }
+}
+
+static void pushJsonArray(lua_State *L, const JsonArray &arr) {
+    lua_newtable(L);
+    int tbl = lua_gettop(L);
+    int key = 1;
+    for (JsonVariant value : arr) {
+        lua_pushinteger(L, key);
+        pushJsonVariant(L, value);
+        lua_settable(L, tbl);
+        key++;
+    }
+}
+
+static void pushJsonObject(lua_State *L, const JsonObject &obj) {
+    lua_newtable(L);
+    int tbl = lua_gettop(L);
+    for (JsonPair kv : obj) {
+        const auto key = kv.key();
+        const auto value = kv.value();
+        pushJsonVariant(L, value);
+        lua_setfield(L, tbl, key.c_str());
+    }
+}
+
 static void checkGPIO(lua_State *L, int pin) {
     if (pin < 20 || 29 > pin) {
         lua_pushstring(L, "Only GPIO 20 - 29 can be accessed!");
@@ -116,52 +182,28 @@ static int lua_delay(lua_State *L) {
     return 0;
 }
 
-// pushes 1 table to the stack
-// static void jsonDocToLuaTable(lua_State *L, const JsonDocument &doc) {
-//     lua_newtable(L);
-//     for (auto key : doc) { // pseudocode
-//         switch (key.type) {
-//             case ARRAY:
-//                 {
-//                     break;
-//                 }
-//             case JSON:
-//                 {
-//                     break;
-//                 }
-//             default:
-//                 {
-//                     break;
-//                 }
-//         }
-//     }
-// }
+static int lua_agentic_send(lua_State *L) {
+    const char *prompt = luaL_checkstring(L, 1);
+    // TODO opts table as 2nd arg
+    JsonDocument msg;
+    msg["role"] = "user";
+    msg["content"] = prompt;
 
-void stopLua() {
-    if (runningLua) {
-        lua_close(runningLua);
-        runningLua = nullptr;
+    JsonDocument doc;
+    doc["model"] = "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4";
+    doc["messages"].add(msg);
+    doc["stream"] = false;
 
-        for (int i = 20; i <= 29; i++) {
-            digitalWrite(i, LOW);
-            pinMode(i, INPUT);
-        }
-    }
+    String jsonString;
+    serializeJson(doc, jsonString);
+
+    // TODO return actual result
+    lua_pushstring(L, jsonString.c_str());
+
+    return 1;
 }
 
-void runLua(String code) {
-    stopLua();
-
-    runningLua = luaL_newstate();
-    if (!runningLua) {
-        Serial.print("Failed to initialize lua\n");
-        sendError("Failed to initialize lua");
-        return;
-    }
-
-    auto L = runningLua;
-    int err;
-
+static void initLuaLib(lua_State *L) {
     luaL_openlibs(L);
 
     lua_register(L, "print", lua_print);
@@ -180,14 +222,41 @@ void runLua(String code) {
     lua_pushinteger(L, INPUT_PULLUP); lua_setglobal(L, "INPUT_PULLUP");
     lua_pushinteger(L, INPUT_PULLDOWN); lua_setglobal(L, "INPUT_PULLDOWN");
 
-    // agentic stuff
-    createTable(0, 0);
-    pushFunction(zlua.wrap(LuaLib.close)); setField(-2, "close");
-    pushFunction(zlua.wrap(LuaLib.render)); setField(-2, "render");
-    pushFunction(zlua.wrap(LuaLib.wait)); setField(-2, "wait");
-    pushFunction(zlua.wrap(LuaLib.show)); setField(-2, "show");
+    lua_newtable(L);
+    lua_pushcfunction(L, lua_agentic_send); lua_setfield(L, -2, "send");
     lua_setglobal(L, "agentic");
+}
 
+void stopLua() {
+    Serial.print("Stopping lua\n");
+    if (runningLua) {
+        lua_close(runningLua);
+        runningLua = nullptr;
+
+        for (int i = 20; i <= 29; i++) {
+            digitalWrite(i, LOW);
+            pinMode(i, INPUT);
+        }
+    }
+}
+
+void runLua(String code) {
+    int err;
+
+    stopLua();
+
+    Serial.print("Initializing lua\n");
+    runningLua = luaL_newstate();
+    if (!runningLua) {
+        sendError("Failed to initialize lua");
+        return;
+    }
+
+    auto L = runningLua;
+
+    initLuaLib(L);
+
+    Serial.printf("Running lua, %s\n", code.c_str());
     err = luaL_dostring(L, code.c_str());
     if (err) {
         sendError(lua_tostring(L, -1));
@@ -232,21 +301,87 @@ bool luaIsRunning() {
     return runningLua != nullptr;
 }
 
-void doLuaStuff() {
-    lua_State *L = luaL_newstate();
-    if (!L) {
-        Serial.print("Failed to initialize lua\n");
-        return;
+static int readResponse(HttpClient &client) {
+    int statusCode = client.responseStatusCode();
+    Serial.printf("Status code: %d\n", statusCode);
+
+    Serial.print("Headers:\n");
+    while (client.headerAvailable()) {
+      String name = client.readHeaderName();
+      String value = client.readHeaderValue();
+      Serial.printf("\t%s: %s\n", name.c_str(), value.c_str());
     }
 
-    String testJson = R"---({"id":"chatcmpl-8d6d2cff624cebd2","object":"chat.completion","created":1788526612,"model":"/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello! How can I help you today?","refusal":null,"annotations":null,"audio":null,"function_call":null,"reasoning":"Here's a thinking process:\n\n1.  **Analyze User Input:** The user said \"Hello!\" which is a standard greeting.\n2.  **Identify Intent:** The user is initiating a conversation.\n3.  **Determine Response:** I should respond with a friendly greeting, acknowledge the user, and offer assistance. I'll keep it simple and polite.\n4.  **Formulate Response:** \"Hello! How can I help you today?\" or similar.\n5.  **Check Constraints:** No specific constraints mentioned. Just say hello back and offer help.\n6.  **Final Output Generation:** \"Hello! How can I help you today?\" (or very similar)✅"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null,"routed_experts":null}],"service_tier":null,"system_fingerprint":"vllm-0.26.1rc1.dev1046+gba07e4a48-a9934369","usage":{"prompt_tokens":18,"total_tokens":172,"completion_tokens":154,"prompt_tokens_details":null,"completion_tokens_details":{"reasoning_tokens":143}},"prompt_logprobs":null,"prompt_token_ids":null,"prompt_text":null,"kv_transfer_params":null,"ec_transfer_params":null,"metrics":null}})---";
+    auto contentLen = client.contentLength();
+    if (contentLen == HttpClient::kNoContentLengthHeader) {
+      Serial.print("Response content length is unknown.\n");
+    } else {
+      Serial.printf("Response content length = %d\n", contentLen);
+    }
 
-    JsonDocument doc;
-    deserializeJson(doc, testJson);
+    if (client.isResponseChunked()) {
+      Serial.print("Response is chunked.\n");
+    }
 
-    Serial.print("----\n");
-    printValue(0, doc.as<JsonVariant>());
-    Serial.print("----\n");
+    int emptyRes = 0;
+    while (true) {
+      String response = client.responseBody();
+      Serial.println("Response: " + response);
+
+      if (response == "") {
+        emptyRes += 1;
+      } else {
+        emptyRes = 0;
+      }
+
+      if (client.completed()) {
+        Serial.println("Completed!");
+        return 0;
+      }
+
+      if (emptyRes > 5) {
+        Serial.println("Server return empty response more than 5 times, stopping...");
+        return 0;
+      }
+    }
+}
+
+static void testHttpStuff() {
+    const auto endpoint = "/v1/chat/completions";
+    const auto contentType = "application/json";
+    const auto hello = R"---({"model": "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", "messages": [{"role": "user", "content": "Hello!"}], "stream": false})---";
+    const auto meow = R"---({"model": "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", "messages": [{"role": "user", "content": "Meow!"}], "stream": false})---";
+    int err = 0;
+
+    Serial.print("--- READING 1ST REQUEST ---\n");
+    HttpClient req1(net, "vaam01.3bbddns.com", 43954);
+    err = req1.post(endpoint, contentType, hello);
+    if (err) {
+      Serial.printf("Failed to send http post: %d\n", err);
+      while (true) {}
+    }
+
+    Serial.print("--- READING 2ND REQUEST ---\n");
+    HttpClient req2(net, "vaam01.3bbddns.com", 43954);
+    err = req2.post(endpoint, contentType, meow);
+    if (err) {
+      Serial.printf("Failed to send http post: %d\n", err);
+      while (true) {}
+    }
+
+    Serial.print("--- READING 2ND RESPONSE ---\n");
+    readResponse(req2);
+
+    Serial.print("--- READING 1ST RESPONSE ---\n");
+    readResponse(req1);
+
+    Serial.print("Stopping...\n");
+    while (true) {}
+}
+
+void doLuaStuff() {
+    runLua("print(agentic.send('hello'))");
+    while (true) {}
 }
 
 static void printTabs(int tab) {
