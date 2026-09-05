@@ -2,264 +2,64 @@
 #include <LittleFS.h>
 #include <WebServer.h>
 #include <FreeRTOS.h>
-#include <lua/lua.hpp>
-#include <WebSocketsServer.h>
+#include <HttpClient.h>
+#include <WiFiClient.h>
 
+#include "lua.hpp"
 #include "dhcp.hpp"
+#include "status.hpp"
+
+#if USE_LAN8651 && !USE_ETHUSB
+
 #include "phy.hpp"
-#include "pin_status.hpp"
 
 // PHY Servicing Task
-TaskHandle_t loopPhyHandle = NULL;
+static TaskHandle_t loopPhyHandle = NULL;
 
-// --- Configuration ---
-WebServer server(80);
-WebSocketsServer webSocket(81);
+static void setupNetwork() {
+  // WARN: dunno if constantly servicing PHY in another core will be good
+  //  since it also interacts with LWIP even though it should be thread-safe
+  //  because LWIP in earlephilhower runs in its own thread.
+  //  (LWIP functions call earlephilhower's wrappers which queue calls
+  //  to the LWIP thread)
+  //
+  // more important than LWIP cuz LWIP depends on PHY?
+  // LWIP_TASK_PRIORITY defaults to (configMAX_PRIORITIES - 2)
+  // (configMAX_PRIORITIES - 1) is max
+  //
+  // 1024-word stack size is random, should probably check if it's too big or too small.
+  // Currently works tho
+  initPhy();
+  xTaskCreate(loopPhy, "loopPhy", 1024, NULL, (configMAX_PRIORITIES - 1), &loopPhyHandle);
 
-// --- State Management ---
-String current_file = "main.lua";
-String lua_code_pending = "";
-bool run_requested = false;
-bool stop_requested = false;
-bool is_running = false;
-unsigned long last_execution_time = 0;
-unsigned long last_yield_time = 0;
-String web_serial_buffer = "";
-int used_pins[40];
-int used_pins_count = 0;
-
-// --- Helpers ---
-String jsonEscape(String s) {
-    String res = "";
-    for (size_t i = 0; i < s.length(); i++) {
-        char c = s[i];
-        if (c == '\"') res += "\\\"";
-        else if (c == '\\') res += "\\\\";
-        else if (c == '\n') res += "\\n";
-        else if (c == '\r') res += "\\r";
-        else if (c == '\t') res += "\\t";
-        else if (c < 32) {} // Ignore other control chars
-        else res += c;
-    }
-    return res;
+  initDHCP();
 }
 
-void log_to_web(String msg) {
-    web_serial_buffer += msg;
-    if (web_serial_buffer.length() > 2000) {
-        web_serial_buffer = web_serial_buffer.substring(web_serial_buffer.length() - 2000);
-    }
+#elif USE_ETHUSB && !USE_LAN8651
+
+#include <NCMEthernetlwIP.h>
+
+static NCMEthernetlwIP eth;
+
+static void setupNetwork() {
+  eth.begin();
+  while (!eth.connected()) {
+    Serial.print("Trying to connect to Ethernet over USB\n");
+    delay(1000);
+  }
+  Serial.print("IP address: ");
+  Serial.println(eth.localIP());
 }
 
-extern "C" void log_to_web_c(const char* msg) {
-    log_to_web(String(msg));
-    String str = String(msg);
-    webSocket.broadcastTXT(str);
-    Serial.print(msg);
-}
+#else
+#error Choose either USE_LAN8651 or USE_ETHUSB
+static void setupNetwork() {}
+#endif
 
-// --- WebSocket Event Handler ---
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
-    (void)num; (void)type; (void)payload; (void)length;
-}
+static WiFiClient net;
 
-// --- Lua Bindings ---
-int lua_print(lua_State *L) {
-    int n = lua_gettop(L);
-    String out = "";
-    for (int i = 1; i <= n; i++) {
-        const char *s = lua_tostring(L, i);
-        if (s) out += s;
-        if (i < n) out += "\t";
-    }
-    Serial.println(out);
-    log_to_web(out + "\n");
-    webSocket.broadcastTXT(out + "\n");
-    return 0;
-}
+static WebServer server(80);
 
-int lua_digitalWrite(lua_State *L) {
-    int pin = luaL_checkinteger(L, 1);
-    int val = luaL_checkinteger(L, 2);
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, val);
-
-    // Track used pins for cleanup
-    bool already_tracked = false;
-    for (int i = 0; i < used_pins_count; i++) {
-        if (used_pins[i] == pin) {
-            already_tracked = true;
-            break;
-        }
-    }
-    if (!already_tracked && used_pins_count < 40) {
-        used_pins[used_pins_count++] = pin;
-    }
-
-    return 0;
-}
-
-int lua_analogWrite(lua_State *L) {
-    int pin = luaL_checkinteger(L, 1);
-    int val = luaL_checkinteger(L, 2);
-    pinMode(pin, OUTPUT);
-    analogWrite(pin, val);
-
-    // Track used pins for cleanup
-    bool already_tracked = false;
-    for (int i = 0; i < used_pins_count; i++) {
-        if (used_pins[i] == pin) {
-            already_tracked = true;
-            break;
-        }
-    }
-    if (!already_tracked && used_pins_count < 40) {
-        used_pins[used_pins_count++] = pin;
-    }
-
-    return 0;
-}
-
-int lua_digitalRead(lua_State *L) {
-    int pin = luaL_checkinteger(L, 1);
-    pinMode(pin, INPUT);
-    int val = digitalRead(pin);
-
-    // Track used pins for cleanup
-    bool already_tracked = false;
-    for (int i = 0; i < used_pins_count; i++) {
-        if (used_pins[i] == pin) {
-            already_tracked = true;
-            break;
-        }
-    }
-    if (!already_tracked && used_pins_count < 40) {
-        used_pins[used_pins_count++] = pin;
-    }
-
-    lua_pushinteger(L, val);
-    return 1;
-}
-
-int lua_analogRead(lua_State *L) {
-    int pin = luaL_checkinteger(L, 1);
-    pinMode(pin, INPUT);
-    int val = analogRead(pin);
-
-    // Track used pins for cleanup
-    bool already_tracked = false;
-    for (int i = 0; i < used_pins_count; i++) {
-        if (used_pins[i] == pin) {
-            already_tracked = true;
-            break;
-        }
-    }
-    if (!already_tracked && used_pins_count < 40) {
-        used_pins[used_pins_count++] = pin;
-    }
-
-    lua_pushinteger(L, val);
-    return 1;
-}
-
-int lua_pinMode(lua_State *L) {
-    int pin = luaL_checkinteger(L, 1);
-    int mode = luaL_checkinteger(L, 2);
-    pinMode(pin, mode);
-
-    // Track used pins for cleanup
-    bool already_tracked = false;
-    for (int i = 0; i < used_pins_count; i++) {
-        if (used_pins[i] == pin) {
-            already_tracked = true;
-            break;
-        }
-    }
-    if (!already_tracked && used_pins_count < 40) {
-        used_pins[used_pins_count++] = pin;
-    }
-
-    return 0;
-}
-
-int lua_delay(lua_State *L) {
-    int ms = luaL_checkinteger(L, 1);
-    unsigned long start = millis();
-    while (millis() - start < (unsigned long)ms) {
-        if (stop_requested) break;
-        server.handleClient();
-        webSocket.loop();
-        delay(1);
-    }
-    return 0;
-}
-
-void lua_hook(lua_State *L, lua_Debug *ar) {
-    (void)ar;
-    if (stop_requested) luaL_error(L, "Stopped by user");
-    unsigned long now = millis();
-    if (now - last_yield_time >= 10) {
-        last_yield_time = now;
-        server.handleClient();
-        webSocket.loop();
-        yield();
-    }
-}
-
-void run_lua(String code) {
-    Serial.println("[run_lua] START");
-    is_running = true;
-    stop_requested = false;
-    lua_State *L = luaL_newstate();
-    if (!L) {
-        Serial.println("[run_lua] Lua State FAIL");
-        log_to_web("Error: Lua State Fail\n");
-        is_running = false;
-        return;
-    }
-    Serial.println("[run_lua] Lua State OK");
-    luaL_openlibs(L);
-    Serial.println("[run_lua] libs opened");
-    lua_register(L, "print", lua_print);
-    lua_register(L, "digitalWrite", lua_digitalWrite);
-    lua_register(L, "analogWrite", lua_analogWrite);
-    lua_register(L, "digitalRead", lua_digitalRead);
-    lua_register(L, "analogRead", lua_analogRead);
-    lua_register(L, "pinMode", lua_pinMode);
-    lua_register(L, "delay", lua_delay);
-    lua_pushinteger(L, HIGH); lua_setglobal(L, "HIGH");
-    lua_pushinteger(L, LOW); lua_setglobal(L, "LOW");
-    lua_pushinteger(L, LED_BUILTIN); lua_setglobal(L, "LED_BUILTIN");
-    lua_pushinteger(L, INPUT); lua_setglobal(L, "INPUT");
-    lua_pushinteger(L, OUTPUT); lua_setglobal(L, "OUTPUT");
-    lua_pushinteger(L, INPUT_PULLUP); lua_setglobal(L, "INPUT_PULLUP");
-    lua_pushinteger(L, INPUT_PULLDOWN); lua_setglobal(L, "INPUT_PULLDOWN");
-    Serial.println("[run_lua] globals registered");
-
-    lua_sethook(L, lua_hook, LUA_MASKCOUNT, 100);
-    Serial.println("[run_lua] calling dostring");
-    log_to_web("--- [" + current_file + "] Start ---\n");
-    unsigned long start_time = millis();
-    if (luaL_dostring(L, code.c_str())) {
-        log_to_web("Lua Error: " + String(lua_tostring(L, -1)) + "\n");
-    }
-    Serial.println("[run_lua] dostring done");
-    last_execution_time = millis() - start_time;
-    log_to_web("--- [" + current_file + "] End ---\n");
-
-    // Cleanup: Reset used pins
-    // for (int i = 0; i < used_pins_count; i++) {
-    //     digitalWrite(used_pins[i], LOW);
-    //     pinMode(used_pins[i], INPUT);
-    // }
-    // used_pins_count = 0;
-
-    lua_close(L);
-    is_running = false;
-    stop_requested = false;
-}
-
-// --- HTML GUI ---
 // TODO: just put this in data/ and use LittleFS
 const char index_html[] PROGMEM = R"rawliteral(
 <!doctype html>
@@ -1093,23 +893,52 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
 
     <script>
-      let pinStatusWS;
-      function connectPinStatusWS() {
-        pinStatusWS = new WebSocket("ws://" + location.hostname + ":82/", [
+      const editor = document.getElementById("editor");
+      const lineNumbers = document.getElementById("lineNumbers");
+      const container = document.getElementById("mainContainer");
+      const stText = document.getElementById("statusText");
+      const ramText = document.getElementById("ramText");
+      const runBtn = document.getElementById("runBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const term = document.getElementById("terminal");
+
+      const modeLabels = ["IN", "OUT", "IN_PU", "IN_PD"];
+
+      let statusWebSocket;
+      let luaWebSocket;
+
+      let currentPath = "/main.lua";
+      let fileToDelete = "";
+
+      window.onload = () => {
+        try {
+          loadFile("/main.lua");
+          connectLuaWS();
+          connectStatusWS();
+        } catch {}
+
+        document
+          .getElementById("chatInput")
+          .addEventListener("keydown", (e) => {
+            if (e.getModifierState("Control") && e.key === "Enter") sendChat();
+          });
+      };
+
+      function connectStatusWS() {
+        statusWebSocket = new WebSocket("ws://" + location.hostname + ":82/", [
           "arduino",
         ]);
-        pinStatusWS.onopen = function () {};
-        pinStatusWS.onclose = function () {
-          setTimeout(function () {
-            connectPinStatusWS();
+        statusWebSocket.onopen = () => {};
+        statusWebSocket.onclose = () => {
+          setTimeout(() => {
+            connectStatusWS();
           }, 2000);
         };
-        pinStatusWS.onerror = function (error) {
+        statusWebSocket.onerror = (error) => {
           console.log("WebSocket Error ", error);
           pinStatus.close();
         };
-        const modeLabels = ["IN", "OUT", "IN_PU", "IN_PD"];
-        pinStatusWS.onmessage = function (e) {
+        statusWebSocket.onmessage = (e) => {
           const pins = JSON.parse(e.data);
           const pinNames = [
             "A0",
@@ -1140,16 +969,30 @@ const char index_html[] PROGMEM = R"rawliteral(
               }
             }
           });
+
+          if (data.free_heap) {
+            ramText.innerText = "RAM: " + Math.round(data.free_heap / 1024) + " KB";
+          }
+
+          if (data.running) {
+            container.classList.add("running");
+            stText.innerText = "Running...";
+            runBtn.disabled = true;
+            stopBtn.disabled = false;
+          } else {
+            container.classList.remove("running");
+            stText.innerText = "Idle";
+            runBtn.disabled = false;
+            stopBtn.disabled = true;
+          }
+
+          // FIXME
+          if (data.logs && !isWsConnected) {
+            term.innerText += data.logs;
+            term.scrollTop = term.scrollHeight;
+          }
         };
       }
-
-      let currentPath = "/main.lua";
-      let fileToDelete = "";
-      let isWsConnected = false;
-      let ws;
-
-      const editor = document.getElementById("editor");
-      const lineNumbers = document.getElementById("lineNumbers");
 
       function updateLineNumbers() {
         const lines = editor.value.split("\n");
@@ -1165,24 +1008,21 @@ const char index_html[] PROGMEM = R"rawliteral(
         lineNumbers.scrollTop = editor.scrollTop;
       }
 
-      function connectWS() {
-        ws = new WebSocket("ws://" + window.location.hostname + ":81");
-        ws.onopen = () => {
-          isWsConnected = true;
-          console.log("WS Connected");
-        };
-        ws.onclose = () => {
-          isWsConnected = false;
+      function connectLuaWS() {
+        luaWebSocket = new WebSocket("ws://" + window.location.hostname + ":81");
+        luaWebSocket.onopen = () => {};
+        luaWebSocket.onclose = () => {
           console.log("WS Disconnected. Reconnecting...");
-          setTimeout(connectWS, 2000);
+          setTimeout(connectLuaWS, 2000);
         };
-        ws.onmessage = (e) => {
+        luaWebSocket.onmessage = (e) => {
           const term = document.getElementById("terminal");
+          // FIXME
           term.innerText += e.data;
           term.scrollTop = term.scrollHeight;
         };
-        ws.onerror = (err) => {
-          ws.close();
+        luaWebSocket.onerror = (err) => {
+          luaWebSocket.close();
         };
       }
 
@@ -1293,70 +1133,31 @@ const char index_html[] PROGMEM = R"rawliteral(
             output.value = "Error: " + err.message;
           });
       }
-
-      setInterval(() => {
-        fetch("/poll")
-          .then((r) => r.json())
-          .then((data) => {
-            const container = document.getElementById("mainContainer");
-            const stText = document.getElementById("statusText");
-            const ramText = document.getElementById("ramText");
-            const runBtn = document.getElementById("runBtn");
-            const stopBtn = document.getElementById("stopBtn");
-            const term = document.getElementById("terminal");
-
-            if (data.free_heap) {
-              ramText.innerText =
-                "RAM: " + Math.round(data.free_heap / 1024) + " KB";
-            }
-
-            if (data.running) {
-              container.classList.add("running");
-              stText.innerText = "Running...";
-              runBtn.disabled = true;
-              stopBtn.disabled = false;
-            } else {
-              container.classList.remove("running");
-              stText.innerText = "Idle";
-              runBtn.disabled = false;
-              stopBtn.disabled = true;
-            }
-            if (data.logs && !isWsConnected) {
-              term.innerText += data.logs;
-              term.scrollTop = term.scrollHeight;
-            }
-          })
-          .catch(() => {});
-      }, 2000);
-
-      window.onload = () => {
-        try {
-          loadFile("/main.lua");
-          connectWS();
-          connectPinStatusWS();
-        } catch {}
-        document
-          .getElementById("chatInput")
-          .addEventListener("keydown", (e) => {
-            if (e.getModifierState("Control") && e.key === "Enter") sendChat();
-          });
-      };
     </script>
   </body>
 </html>
 )rawliteral";
 
-// --- Web Handlers ---
 void handleRoot() {
     Serial.print("Sending index.html\n");
     server.send(200, "text/html", index_html);
     Serial.print("Sent index.html\n");
 }
+
 void handleList() {
-    String json = "["; Dir root = LittleFS.openDir("/"); bool first = true;
-    while (root.next()) { if (!first) json += ","; json += "{\"name\":\"" + root.fileName() + "\"}"; first = false; }
-    json += "]"; server.send(200, "application/json", json);
+    String json = "[";
+    Dir root = LittleFS.openDir("/");
+    bool first = true;
+    while (root.next()) {
+        if (!first)
+            json += ",";
+        json += "{\"name\":\"" + root.fileName() + "\"}";
+        first = false;
+    }
+    json += "]";
+    server.send(200, "application/json", json);
 }
+
 void handleRead() {
     String path = server.arg("path");
     if (LittleFS.exists(path)) {
@@ -1372,70 +1173,103 @@ void handleRead() {
         server.send(200, "text/plain", "");
     }
 }
+
 void handleUpload() {
     String path = server.arg("path"); if (path == "") path = "/main.lua";
     File f = LittleFS.open(path, "w");
     if (f) { f.print(server.arg("plain")); f.close(); server.send(200, "text/plain", "Saved"); }
     else server.send(500, "text/plain", "Error");
 }
-void handleCreate() { String path = server.arg("path"); File f = LittleFS.open(path, "w"); if (f) { f.close(); server.send(200); } else server.send(500); }
-void handleDelete() { String path = server.arg("path"); if (LittleFS.remove(path)) server.send(200); else server.send(500); }
 
+void handleCreate() {
+    String path = server.arg("path");
+    File f = LittleFS.open(path, "w");
+    if (f) {
+        f.close();
+        server.send(200);
+    } else {
+        server.send(500);
+    }
+}
+
+void handleDelete() {
+    String path = server.arg("path");
+    if (LittleFS.remove(path))
+        server.send(200);
+    else
+        server.send(500);
+}
+
+// NOTE: handleRun() and handleStop() probably cannot be called simultaneously?
 void handleRun() {
-    lua_code_pending = server.arg("plain");
-    run_requested = true;
-    Serial.println("[handleRun] called, code length=" + String(lua_code_pending.length()));
+    auto code = server.arg("plain");
+    runLua(code);
     server.send(200, "text/plain", "OK");
 }
-void handleStop() { stop_requested = true; server.send(200, "text/plain", "Stop Issued"); }
 
-void handlePoll() {
-    String json;
-    json.reserve(512);
-    json = "{";
-    json += "\"running\":" + String(is_running ? "true" : "false") + ",";
-    json += "\"free_heap\":" + String(rp2040.getFreeHeap()) + ",";
-    json += "\"exec_time\":" + String(last_execution_time) + ",";
-    json += "\"logs\":\"" + jsonEscape(web_serial_buffer) + "\"";
-    json += "}";
-    server.send(200, "application/json", json);
-    web_serial_buffer = "";
+void handleStop() {
+    stopLua();
+    server.send(200, "text/plain", "Stop Issued");
 }
 
-void loopPinWebSocketWrapper(void *params) {
-    loopPinWebSocket();
-}
+int readResponse(HttpClient &client) {
+    int statusCode = client.responseStatusCode();
+    Serial.printf("Status code: %d\n", statusCode);
 
-void loopPhy(void *params) {
+    Serial.print("Headers:\n");
+    while (client.headerAvailable()) {
+      String name = client.readHeaderName();
+      String value = client.readHeaderValue();
+      Serial.printf("\t%s: %s\n", name.c_str(), value.c_str());
+    }
+
+    auto contentLen = client.contentLength();
+    if (contentLen == HttpClient::kNoContentLengthHeader) {
+      Serial.print("Response content length is unknown.\n");
+    } else {
+      Serial.printf("Response content length = %d\n", contentLen);
+    }
+
+    if (client.isResponseChunked()) {
+      Serial.print("Response is chunked.\n");
+    }
+
+    int emptyRes = 0;
     while (true) {
-        servicePhy();
-        delay(100);
+      String response = client.responseBody();
+      Serial.println("Response: " + response);
+
+      if (response == "") {
+        emptyRes += 1;
+      } else {
+        emptyRes = 0;
+      }
+
+      if (client.completed()) {
+        Serial.println("Completed!");
+        return 0;
+      }
+
+      if (emptyRes > 5) {
+        Serial.println("Server return empty response more than 5 times, stopping...");
+        return 0;
+      }
     }
 }
 
 void setup() {
     Serial.begin(115200);
-
     while (!Serial) {}
+
+    doLuaStuff();
+    Serial.print("Stopping...\n");
+    while (true) {}
 
     LittleFS.begin();
 
-    // WARN: dunno if constantly servicing PHY in another core will be good
-    //  since it also interacts with LWIP even though it should be thread-safe
-    //  because LWIP in earlephilhower runs in its own thread.
-    //  (LWIP functions call earlephilhower's wrappers which queue calls
-    //  to the LWIP thread)
-    //
-    // more important than LWIP cuz LWIP depends on PHY?
-    // LWIP_TASK_PRIORITY defaults to (configMAX_PRIORITIES - 2)
-    // (configMAX_PRIORITIES - 1) is max
-    //
-    // 1024-word stack size is random, should probably check if it's too big or too small.
-    // Currently works tho
-    initPhy();
-    xTaskCreate(loopPhy, "loopPhy", 1024, NULL, (configMAX_PRIORITIES - 1), &loopPhyHandle);
+    setupNetwork();
 
-    initDHCP();
+    initStatus();
 
     server.on("/", handleRoot);
     server.on("/list_files", handleList);
@@ -1445,20 +1279,11 @@ void setup() {
     server.on("/delete", HTTP_POST, handleDelete);
     server.on("/run", HTTP_POST, handleRun);
     server.on("/stop", HTTP_POST, handleStop);
-    server.on("/poll", handlePoll);
     server.begin();
-    webSocket.begin();
-    webSocket.onEvent(webSocketEvent);
-    initPinWebSocket();
 }
 
 void loop() {
     server.handleClient();
-    webSocket.loop();
-    loopPinWebSocket();
-    if (run_requested) {
-        run_requested = false;
-        delay(50);
-        run_lua(lua_code_pending);
-    }
+    loopLua();
+    loopStatus();
 }

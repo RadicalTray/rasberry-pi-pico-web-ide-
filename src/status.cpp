@@ -5,6 +5,8 @@
 #include <WiFiClient.h>
 #include <MQTT.h>
 
+#include "lua.hpp"
+
 static int getPinMode(uint8_t pin) {
     if (pin >= NUM_DIGITAL_PINS) return -1;
 
@@ -92,25 +94,6 @@ static WiFiClient net;
 static MQTTClient mqttClient;
 
 static void sendUpdate(PinState pinState) {
-    JsonDocument doc;
-
-    for (int i = 0; i < 6; i++) {
-        String key = "D";
-        doc[key + i] = pinState.d[i].json();
-    }
-
-    for (int i = 0; i < 4; i++) {
-        String key = "A";
-        doc[key + i] = pinState.a[i].json();
-    }
-
-    String output;
-    serializeJson(doc, output);
-
-    Serial.printf("Sending update\n");
-    // Serial.printf("Sending update: %s\n", output.c_str());
-
-    pinWebSocket.broadcastTXT(output);
 }
 
 static void pinWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
@@ -134,7 +117,7 @@ static void pinWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, siz
     }
 }
 
-void initPinWebSocket() {
+void initStatus() {
     pinWebSocket.begin();
     pinWebSocket.onEvent(pinWebSocketEvent);
 
@@ -151,7 +134,7 @@ void initPinWebSocket() {
     Serial.print("MQTT connected!\n");
 }
 
-void loopPinWebSocket() {
+void loopStatus() {
     static unsigned long prev = 0;
     auto now = millis();
 
@@ -162,25 +145,41 @@ void loopPinWebSocket() {
         Serial.print("MQTT Reconnecting...\n");
         if (mqttClient.connect("")) {
             Serial.print("MQTT connected!\n");
+        } else {
+            return;
         }
     }
 
     if (now - prev > 1000) {
         prev = now;
 
-        prevPinState = currPinState;
-        currPinState.poll();
-        if (!currPinState.equal(prevPinState)) {
-            sendUpdate(currPinState);
+        PinState pinState{};
+        pinState.poll();
+
+        JsonDocument doc;
+
+        doc["running"] = luaIsRunning();
+        doc["free_heap"] = rp2040.getFreeHeap();
+
+        for (int i = 0; i < 6; i++) {
+            String key = "D";
+            doc[key + i] = pinState.d[i].json();
         }
+        for (int i = 0; i < 4; i++) {
+            String key = "A";
+            doc[key + i] = pinState.a[i].json();
+        }
+
+        String output;
+        serializeJson(doc, output);
+
+        pinWebSocket.broadcastTXT(output);
 
         if (mqttClient.connected()) {
-            mqttClient.publish("A/0", String(currPinState.a[0].value));
-            mqttClient.publish("A/1", String(currPinState.a[1].value));
-            mqttClient.publish("A/2", String(currPinState.a[2].value));
-            mqttClient.publish("A/3", String(currPinState.a[3].value));
+            mqttClient.publish("A/0", String(pinState.a[0].value));
+            mqttClient.publish("A/1", String(pinState.a[1].value));
+            mqttClient.publish("A/2", String(pinState.a[2].value));
+            mqttClient.publish("A/3", String(pinState.a[3].value));
         }
-
-        // currPinState.dump();
     }
 }

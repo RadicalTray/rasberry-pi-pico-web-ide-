@@ -8,6 +8,7 @@
 //  (just call lwip_getaddrinfo() to get hostname info)
 
 static dhcp_server_t my_dhcp_server;
+static struct dhcp netif_dhcp;
 
 static void initDHCPServer() {
     IPAddress const ip = PHY_IP_ADDR;
@@ -19,10 +20,20 @@ static void initDHCPServer() {
 }
 
 static void initDHCPClient() {
-    if (dhcp_start(netif_default) != ERR_OK)
+    dhcp_set_struct(netif_default, &netif_dhcp);
+    err_t err = dhcp_start(netif_default);
+    if (err != ERR_OK) {
         Serial.print("Failed to start dhcp client");
+        return;
+    }
+    while (!dhcp_supplied_address(netif_default)) {
+        Serial.print("Waiting for dhcp to supply ip address...\n");
+        delay(1000);
+    }
 }
 
 void initDHCP() {
-    initDHCPServer();
+    initDHCPClient();
+    Serial.printf("IP address: %s\n", ip4addr_ntoa(netif_ip4_addr(netif_default)));
+
 }

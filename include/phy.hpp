@@ -15,3 +15,4 @@ extern TC6::TC6_Arduino_10BASE_T1S t1s_phy;
 
 void initPhy();
 void servicePhy();
+void loopPhy(void *params);

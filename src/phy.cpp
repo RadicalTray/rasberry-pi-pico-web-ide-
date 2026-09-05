@@ -63,3 +63,10 @@ void servicePhy() {
       Serial.print("getPlcaStatus(...) failed\n");
   }
 }
+
+void loopPhy(void *params) {
+    while (true) {
+        servicePhy();
+        delay(100);
+    }
+}

@@ -1,2 +1,0 @@
-void initPinWebSocket();
-void loopPinWebSocket();

@@ -829,23 +829,52 @@
     </div>
 
     <script>
-      let pinStatusWS;
-      function connectPinStatusWS() {
-        pinStatusWS = new WebSocket("ws://" + location.hostname + ":82/", [
+      const editor = document.getElementById("editor");
+      const lineNumbers = document.getElementById("lineNumbers");
+      const container = document.getElementById("mainContainer");
+      const stText = document.getElementById("statusText");
+      const ramText = document.getElementById("ramText");
+      const runBtn = document.getElementById("runBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const term = document.getElementById("terminal");
+
+      const modeLabels = ["IN", "OUT", "IN_PU", "IN_PD"];
+
+      let statusWebSocket;
+      let luaWebSocket;
+
+      let currentPath = "/main.lua";
+      let fileToDelete = "";
+
+      window.onload = () => {
+        try {
+          loadFile("/main.lua");
+          connectLuaWS();
+          connectStatusWS();
+        } catch {}
+
+        document
+          .getElementById("chatInput")
+          .addEventListener("keydown", (e) => {
+            if (e.getModifierState("Control") && e.key === "Enter") sendChat();
+          });
+      };
+
+      function connectStatusWS() {
+        statusWebSocket = new WebSocket("ws://" + location.hostname + ":82/", [
           "arduino",
         ]);
-        pinStatusWS.onopen = function () {};
-        pinStatusWS.onclose = function () {
-          setTimeout(function () {
-            connectPinStatusWS();
+        statusWebSocket.onopen = () => {};
+        statusWebSocket.onclose = () => {
+          setTimeout(() => {
+            connectStatusWS();
           }, 2000);
         };
-        pinStatusWS.onerror = function (error) {
+        statusWebSocket.onerror = (error) => {
           console.log("WebSocket Error ", error);
           pinStatus.close();
         };
-        const modeLabels = ["IN", "OUT", "IN_PU", "IN_PD"];
-        pinStatusWS.onmessage = function (e) {
+        statusWebSocket.onmessage = (e) => {
           const pins = JSON.parse(e.data);
           const pinNames = [
             "A0",
@@ -876,16 +905,30 @@
               }
             }
           });
+
+          if (data.free_heap) {
+            ramText.innerText = "RAM: " + Math.round(data.free_heap / 1024) + " KB";
+          }
+
+          if (data.running) {
+            container.classList.add("running");
+            stText.innerText = "Running...";
+            runBtn.disabled = true;
+            stopBtn.disabled = false;
+          } else {
+            container.classList.remove("running");
+            stText.innerText = "Idle";
+            runBtn.disabled = false;
+            stopBtn.disabled = true;
+          }
+
+          // FIXME
+          if (data.logs && !isWsConnected) {
+            term.innerText += data.logs;
+            term.scrollTop = term.scrollHeight;
+          }
         };
       }
-
-      let currentPath = "/main.lua";
-      let fileToDelete = "";
-      let isWsConnected = false;
-      let ws;
-
-      const editor = document.getElementById("editor");
-      const lineNumbers = document.getElementById("lineNumbers");
 
       function updateLineNumbers() {
         const lines = editor.value.split("\n");
@@ -901,24 +944,21 @@
         lineNumbers.scrollTop = editor.scrollTop;
       }
 
-      function connectWS() {
-        ws = new WebSocket("ws://" + window.location.hostname + ":81");
-        ws.onopen = () => {
-          isWsConnected = true;
-          console.log("WS Connected");
-        };
-        ws.onclose = () => {
-          isWsConnected = false;
+      function connectLuaWS() {
+        luaWebSocket = new WebSocket("ws://" + window.location.hostname + ":81");
+        luaWebSocket.onopen = () => {};
+        luaWebSocket.onclose = () => {
           console.log("WS Disconnected. Reconnecting...");
-          setTimeout(connectWS, 2000);
+          setTimeout(connectLuaWS, 2000);
         };
-        ws.onmessage = (e) => {
+        luaWebSocket.onmessage = (e) => {
           const term = document.getElementById("terminal");
+          // FIXME
           term.innerText += e.data;
           term.scrollTop = term.scrollHeight;
         };
-        ws.onerror = (err) => {
-          ws.close();
+        luaWebSocket.onerror = (err) => {
+          luaWebSocket.close();
         };
       }
 
@@ -1029,54 +1069,6 @@
             output.value = "Error: " + err.message;
           });
       }
-
-      setInterval(() => {
-        fetch("/poll")
-          .then((r) => r.json())
-          .then((data) => {
-            const container = document.getElementById("mainContainer");
-            const stText = document.getElementById("statusText");
-            const ramText = document.getElementById("ramText");
-            const runBtn = document.getElementById("runBtn");
-            const stopBtn = document.getElementById("stopBtn");
-            const term = document.getElementById("terminal");
-
-            if (data.free_heap) {
-              ramText.innerText =
-                "RAM: " + Math.round(data.free_heap / 1024) + " KB";
-            }
-
-            if (data.running) {
-              container.classList.add("running");
-              stText.innerText = "Running...";
-              runBtn.disabled = true;
-              stopBtn.disabled = false;
-            } else {
-              container.classList.remove("running");
-              stText.innerText = "Idle";
-              runBtn.disabled = false;
-              stopBtn.disabled = true;
-            }
-            if (data.logs && !isWsConnected) {
-              term.innerText += data.logs;
-              term.scrollTop = term.scrollHeight;
-            }
-          })
-          .catch(() => {});
-      }, 2000);
-
-      window.onload = () => {
-        try {
-          loadFile("/main.lua");
-          connectWS();
-          connectPinStatusWS();
-        } catch {}
-        document
-          .getElementById("chatInput")
-          .addEventListener("keydown", (e) => {
-            if (e.getModifierState("Control") && e.key === "Enter") sendChat();
-          });
-      };
     </script>
   </body>
 </html>
