@@ -29,7 +29,9 @@ static void setupNetwork() {
   // 1024-word stack size is random, should probably check if it's too big or too small.
   // Currently works tho
   initPhy();
-  xTaskCreate(loopPhy, "loopPhy", 1024, NULL, (configMAX_PRIORITIES - 1), &loopPhyHandle);
+
+  // FIXME idk
+  xTaskCreate(loopPhy, "loopPhy", 1024, nullptr, 1, &loopPhyHandle);
 
   initDHCP();
 }
@@ -1219,7 +1221,7 @@ void setup() {
     Serial.begin(115200);
     while (!Serial) {}
 
-    doLuaStuff();
+    // doLuaStuff();
 
     LittleFS.begin();
 
@@ -1243,7 +1245,11 @@ void setup() {
 }
 
 void loop() {
+    Serial.print("main loop\n");
+    Serial.print("handle client\n");
     server.handleClient();
+    Serial.print("loop lua\n");
     loopLua();
+    Serial.print("loop status\n");
     loopStatus();
 }

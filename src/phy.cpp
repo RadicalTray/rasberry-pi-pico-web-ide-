@@ -1,4 +1,5 @@
 #include <SPI.h>
+#include <lwip_wrap.h>
 
 #include "phy.hpp"
 
@@ -51,7 +52,7 @@ void initPhy() {
   Serial.println(PHY_T1S_DEFAULT_MAC_SETTINGS);
 }
 
-void servicePhy() {
+static void servicePhy(void *cbdata) {
   static unsigned long prev_beacon_check = 0;
   auto now = millis();
 
@@ -65,8 +66,13 @@ void servicePhy() {
 }
 
 void loopPhy(void *params) {
-    while (true) {
-        servicePhy();
-        yield();
-    }
+  while (true) {
+    Serial.print("Servicing Phy\n");
+    // FIXME idk
+    // if (xSemaphoreTake(t1s_phy, portMAX_DELAY) != pdTRUE) {
+    //   continue;
+    // }
+    lwip_callback(servicePhy, nullptr);
+    delay(10);
+  }
 }

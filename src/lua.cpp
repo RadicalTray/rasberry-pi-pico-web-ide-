@@ -256,7 +256,7 @@ void runLua(String code) {
 
     initLuaLib(L);
 
-    Serial.printf("Running lua, %s\n", code.c_str());
+    Serial.printf("Running lua\n", code.c_str());
     err = luaL_dostring(L, code.c_str());
     if (err) {
         sendError(lua_tostring(L, -1));
@@ -264,8 +264,10 @@ void runLua(String code) {
         return;
     }
 
+
     // Calls setup()
     // can still block the thread bruh
+    Serial.printf("Running lua setup()\n", code.c_str());
     if (lua_getglobal(L, "setup") == LUA_TFUNCTION) {
         err = lua_pcall(L, 0, 0, 0);
         if (err) {
