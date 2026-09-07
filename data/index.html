@@ -945,7 +945,7 @@ end</textarea>
 
       function updateLineNumbers() {
         const lines = editor.value.split("\n");
-        let count = lines.length;
+        const count = lines.length;
         let numbers = "";
         for (let i = 1; i <= count; i++) {
           numbers += i + "<br>";
