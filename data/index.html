@@ -871,11 +871,9 @@ end</textarea>
       let fileToDelete = "";
 
       window.onload = () => {
-        try {
-          loadFile("/main.lua");
-          connectLuaWS();
-          connectStatusWS();
-        } catch {}
+        listFiles();
+        connectLuaWS();
+        connectStatusWS();
       };
 
       function connectStatusWS() {
@@ -968,18 +966,14 @@ end</textarea>
         };
         luaWebSocket.onmessage = (e) => {
           // FIXME
-          e.data
-            .json()
-            .then((json) => {
-              if (json.type === "data") {
-                term.innerText += json.data;
-                term.scrollTop = term.scrollHeight;
-              } else if (json.type === "error") {
-                term.innerText += `\nError: ${json.data}\n`;
-                term.scrollTop = term.scrollHeight;
-              }
-            })
-            .catch(() => {});
+          const json = JSON.parse(e.data);
+          if (json.type === "data") {
+            term.innerText += json.data;
+            term.scrollTop = term.scrollHeight;
+          } else if (json.type === "error") {
+            term.innerText += `\nError: ${json.data}\n`;
+            term.scrollTop = term.scrollHeight;
+          }
         };
         luaWebSocket.onerror = (err) => {
           luaWebSocket.close();

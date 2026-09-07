@@ -309,8 +309,10 @@ static int lua_agentic_send(lua_State *L) {
         http.addHeader("Content-Type", "application/json");
         int httpCode = http.POST(request);
         if (httpCode > 0) {
+            String responseString = http.getString();
+            Serial.printf("got response: %s\n", responseString.c_str());
             JsonDocument response;
-            deserializeJson(response, http.getString());
+            deserializeJson(response, responseString);
             http.end(); // is this required?
             pushJsonVariant(L, response.as<JsonVariant>());
             return 1;
@@ -326,7 +328,7 @@ static int lua_agentic_send(lua_State *L) {
         lua_error(L); // never returns
         return 0;
     }
-    return 0;
+    return 0; // unreachable
 }
 
 static int lua_agentic_wait(lua_State *L) {
