@@ -579,8 +579,7 @@ function setup()
 end
 
 function loop()
-end
-        </textarea>
+end</textarea>
       </div>
       <div class="terminal" id="terminal"></div>
     </div>
@@ -947,9 +946,6 @@ end
       function updateLineNumbers() {
         const lines = editor.value.split("\n");
         let count = lines.length;
-        if (count > 1) {
-          count = count - 1;
-        }
         let numbers = "";
         for (let i = 1; i <= count; i++) {
           numbers += i + "<br>";
