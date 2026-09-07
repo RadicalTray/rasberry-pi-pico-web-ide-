@@ -1,5 +1,8 @@
 EMERGENCY
 	Response too big (?) => Locks at src/lua_stuff.cpp:310:42:http.POST(request) probably
 
+	ORRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+		IT COULD BE IM DUMB AND THERE'S A MEMORY LEAK SOMEWHERE
+
 TODO
 	agent chat in web for now i guess
