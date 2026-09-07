@@ -273,6 +273,8 @@ void runLua(String code) {
             stopLua();
             return;
         }
+    } else {
+        lua_pop(L, 1);
     }
 }
 
@@ -293,6 +295,8 @@ void loopLua() {
                 stopLua();
                 return;
             }
+        } else {
+            lua_pop(L, 1);
         }
     }
 }
