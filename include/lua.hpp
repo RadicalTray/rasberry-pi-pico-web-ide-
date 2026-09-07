@@ -7,4 +7,3 @@ void runLua(String code);
 void stopLua();
 void initLua();
 void loopLua();
-void doLuaStuff();

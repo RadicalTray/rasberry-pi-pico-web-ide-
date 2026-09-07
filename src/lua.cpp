@@ -7,6 +7,8 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+// #include "http_clients.hpp"
+
 enum Type {
     NONE,
     ARRAY,
@@ -265,6 +267,7 @@ static int lua_delay(lua_State *L) {
 static int lua_http_post(lua_State *L) {
     HTTPClient http;
     if (http.begin("http://192.168.42.1:8282/")) {
+        http.addHeader("Content-Type", "application/json");
         if (http.POST(testResponseString) > 0) {
             String data = http.getString();
             Serial.println(data);
@@ -275,37 +278,71 @@ static int lua_http_post(lua_State *L) {
 }
 
 static int lua_agentic_send(lua_State *L) {
-    const char *prompt = luaL_checkstring(L, 1);
-    luaL_checktype(L, 2, LUA_TTABLE);
-
-    // Options
-    JsonDocument opts;
-    luaTableToJson(opts, L, 2);
-
-    String optsString;
-    serializeJson(opts, optsString);
-    Serial.printf("Opts: %s\n", optsString.c_str());
+    luaL_checktype(L, 1, LUA_TTABLE); // messages
+    luaL_checktype(L, 2, LUA_TTABLE); // options
 
     // Request json
-    JsonDocument msg;
-    msg["role"] = "user";
-    msg["content"] = prompt;
+    const String url = "http://vaam01.3bbddns.com:43954/v1/chat/completions";
+    HTTPClient http;
+    if (http.begin(url)) {
+        JsonDocument messages;
+        luaTableToJson(messages, L, 1);
 
-    JsonDocument doc;
-    doc["model"] = "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4";
-    doc["messages"].add(msg);
-    doc["stream"] = false;
+        JsonDocument opts;
+        luaTableToJson(opts, L, 2);
 
-    String request;
-    serializeJson(doc, request);
-    Serial.printf("Request: %s\n", request.c_str());
+        // DEBUGGING STUFF
+        String tmp;
+        serializeJson(messages, tmp);
+        Serial.printf("Messages: %s\n", tmp.c_str());
+        serializeJson(opts, tmp);
+        Serial.printf("Opts: %s\n", tmp.c_str());
 
-    // Response json
-    JsonDocument response;
-    deserializeJson(response, testResponseString);
+        JsonDocument doc;
+        doc["model"] = "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4";
+        doc["messages"] = messages;
+        doc["stream"] = false;
 
-    pushJsonVariant(L, response.as<JsonVariant>());
+        String request;
+        serializeJson(doc, request);
+        Serial.printf("Request: %s\n", request.c_str());
 
+        http.addHeader("Content-Type", "application/json");
+        int httpCode = http.POST(request);
+        if (httpCode > 0) {
+            JsonDocument response;
+            deserializeJson(response, http.getString());
+            http.end(); // is this required?
+            pushJsonVariant(L, response.as<JsonVariant>());
+            return 1;
+        } else {
+            lua_pushstring(L, http.errorToString(httpCode).c_str());
+            http.end(); // is this required?
+            lua_error(L); // never returns
+            return 0;
+        }
+    } else {
+        String err = "can't connect to " + url;
+        lua_pushstring(L, err.c_str());
+        lua_error(L); // never returns
+        return 0;
+    }
+    return 0;
+}
+
+static int lua_agentic_wait(lua_State *L) {
+    // lua_checktable(L, 1);
+    // lua_getfield(L, 1, "handle");
+    // Handle handle lua_checkinteger(L, -1);
+    // lua_pop(L, 1);
+    //
+    // String response = httpWait(handle);
+    //
+    // JsonDocument doc;
+    // deserializeJson(doc, response);
+    // pushJsonVariant(L, doc.as<JsonVariant>());
+    //
+    // return 1;
     return 1;
 }
 
@@ -494,11 +531,6 @@ bool luaIsRunning() {
 //     while (true) {}
 // }
 
-void doLuaStuff() {
-    runLua("print(agentic.send('hello'))");
-    while (true) {}
-}
-
 static void printTabs(int tab) {
     for (int i = 0; i < tab; i++)
         Serial.print("\t");
@@ -545,3 +577,10 @@ static void printObject(int tab, const JsonObject &obj) {
         printValue(tab, value);
     }
 }
+
+// example usage of async
+//  local req = agentic.send()
+//
+//  do something...
+//
+//  printTable(req:wait())
