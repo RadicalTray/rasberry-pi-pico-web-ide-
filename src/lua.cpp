@@ -3,7 +3,9 @@
 #include <WebSocketsServer.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
-#include <lua/lua.hpp>
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
 
 enum Type {
     NONE,
@@ -11,7 +13,7 @@ enum Type {
     OBJECT,
 };
 
-const String testResponseString = R"---({"id":"chatcmpl-8d6d2cff624cebd2","object":"chat.completion","created":1788526612,"model":"/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello! How can I help you today?","refusal":null,"annotations":null,"audio":null,"function_call":null,"reasoning":"Here's a thinking process:\n\n1.  **Analyze User Input:** The user said \"Hello!\" which is a standard greeting.\n2.  **Identify Intent:** The user is initiating a conversation.\n3.  **Determine Response:** I should respond with a friendly greeting, acknowledge the user, and offer assistance. I'll keep it simple and polite.\n4.  **Formulate Response:** \"Hello! How can I help you today?\" or similar.\n5.  **Check Constraints:** No specific constraints mentioned. Just say hello back and offer help.\n6.  **Final Output Generation:** \"Hello! How can I help you today?\" (or very similar)✅"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null,"routed_experts":null}],"service_tier":null,"system_fingerprint":"vllm-0.26.1rc1.dev1046+gba07e4a48-a9934369","usage":{"prompt_tokens":18,"total_tokens":172,"completion_tokens":154,"prompt_tokens_details":null,"completion_tokens_details":{"reasoning_tokens":143}},"prompt_logprobs":null,"prompt_token_ids":null,"prompt_text":null,"kv_transfer_params":null,"ec_transfer_params":null,"metrics":null}})---";
+const String testResponseString = R"---({"id":"chatcmpl-8d6d2cff624cebd2","object":"chat.completion","created":1788526612,"model":"/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello! How can I help you today?","refusal":null,"annotations":null,"audio":null,"function_call":null,"reasoning":"Here's a thinking process:\n\n1.  **Analyze User Input:** The user said \"Hello!\" which is a standard greeting.\n2.  **Identify Intent:** The user is initiating a conversation.\n3.  **Determine Response:** I should respond with a friendly greeting, acknowledge the user, and offer assistance. I'll keep it simple and polite.\n4.  **Formulate Response:** \"Hello! How can I help you today?\" or similar.\n5.  **Check Constraints:** No specific constraints mentioned. Just say hello back and offer help.\n6.  **Final Output Generation:** \"Hello! How can I help you today?\" (or very similar)✅"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null,"routed_experts":null}],"service_tier":null,"system_fingerprint":"vllm-0.26.1rc1.dev1046+gba07e4a48-a9934369","usage":{"prompt_tokens":18,"total_tokens":172,"completion_tokens":154,"prompt_tokens_details":null,"completion_tokens_details":{"reasoning_tokens":143}},"prompt_logprobs":null,"prompt_token_ids":null,"prompt_text":null,"kv_transfer_params":null,"ec_transfer_params":null,"metrics":null})---";
 
 // random json debugging utils
 static void printTabs(int tab);
@@ -260,6 +262,18 @@ static int lua_delay(lua_State *L) {
     return 0;
 }
 
+static int lua_http_post(lua_State *L) {
+    HTTPClient http;
+    if (http.begin("http://192.168.42.1:8282/")) {
+        if (http.POST(testResponseString) > 0) {
+            String data = http.getString();
+            Serial.println(data);
+        }
+        http.end();
+    }
+    return 0;
+}
+
 static int lua_agentic_send(lua_State *L) {
     const char *prompt = luaL_checkstring(L, 1);
     luaL_checktype(L, 2, LUA_TTABLE);
@@ -317,6 +331,10 @@ static void initLuaLib(lua_State *L) {
     lua_newtable(L);
     lua_pushcfunction(L, lua_agentic_send); lua_setfield(L, -2, "send");
     lua_setglobal(L, "agentic");
+
+    lua_newtable(L);
+    lua_pushcfunction(L, lua_http_post); lua_setfield(L, -2, "post");
+    lua_setglobal(L, "http");
 }
 
 void stopLua() {

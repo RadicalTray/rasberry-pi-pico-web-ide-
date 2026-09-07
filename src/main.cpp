@@ -8,7 +8,7 @@
 #include "dhcp.hpp"
 #include "status.hpp"
 
-#if USE_LAN8651 && !USE_ETHUSB
+#if defined(USE_LAN8651) && !defined(USE_ETHUSB)
 
 #include "phy.hpp"
 
@@ -30,7 +30,7 @@ static void setupNetwork() {
   initDHCP();
 }
 
-#elif USE_ETHUSB && !USE_LAN8651
+#elif defined(USE_ETHUSB) && !defined(USE_LAN8651)
 
 #include <NCMEthernetlwIP.h>
 
@@ -47,7 +47,7 @@ static void setupNetwork() {
 }
 
 #else
-#error Choose either USE_LAN8651 or USE_ETHUSB
+#error Choose either -DUSE_LAN8651 or -DUSE_ETHUSB
 static void setupNetwork() {}
 #endif
 
