@@ -5,7 +5,13 @@
 #include <HTTPClient.h>
 #include <lua/lua.hpp>
 
-const String testJson = R"---({"id":"chatcmpl-8d6d2cff624cebd2","object":"chat.completion","created":1788526612,"model":"/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello! How can I help you today?","refusal":null,"annotations":null,"audio":null,"function_call":null,"reasoning":"Here's a thinking process:\n\n1.  **Analyze User Input:** The user said \"Hello!\" which is a standard greeting.\n2.  **Identify Intent:** The user is initiating a conversation.\n3.  **Determine Response:** I should respond with a friendly greeting, acknowledge the user, and offer assistance. I'll keep it simple and polite.\n4.  **Formulate Response:** \"Hello! How can I help you today?\" or similar.\n5.  **Check Constraints:** No specific constraints mentioned. Just say hello back and offer help.\n6.  **Final Output Generation:** \"Hello! How can I help you today?\" (or very similar)✅"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null,"routed_experts":null}],"service_tier":null,"system_fingerprint":"vllm-0.26.1rc1.dev1046+gba07e4a48-a9934369","usage":{"prompt_tokens":18,"total_tokens":172,"completion_tokens":154,"prompt_tokens_details":null,"completion_tokens_details":{"reasoning_tokens":143}},"prompt_logprobs":null,"prompt_token_ids":null,"prompt_text":null,"kv_transfer_params":null,"ec_transfer_params":null,"metrics":null}})---";
+enum Type {
+    NONE,
+    ARRAY,
+    OBJECT,
+};
+
+const String testResponseString = R"---({"id":"chatcmpl-8d6d2cff624cebd2","object":"chat.completion","created":1788526612,"model":"/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4","choices":[{"index":0,"message":{"role":"assistant","content":"Hello! How can I help you today?","refusal":null,"annotations":null,"audio":null,"function_call":null,"reasoning":"Here's a thinking process:\n\n1.  **Analyze User Input:** The user said \"Hello!\" which is a standard greeting.\n2.  **Identify Intent:** The user is initiating a conversation.\n3.  **Determine Response:** I should respond with a friendly greeting, acknowledge the user, and offer assistance. I'll keep it simple and polite.\n4.  **Formulate Response:** \"Hello! How can I help you today?\" or similar.\n5.  **Check Constraints:** No specific constraints mentioned. Just say hello back and offer help.\n6.  **Final Output Generation:** \"Hello! How can I help you today?\" (or very similar)✅"},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null,"routed_experts":null}],"service_tier":null,"system_fingerprint":"vllm-0.26.1rc1.dev1046+gba07e4a48-a9934369","usage":{"prompt_tokens":18,"total_tokens":172,"completion_tokens":154,"prompt_tokens_details":null,"completion_tokens_details":{"reasoning_tokens":143}},"prompt_logprobs":null,"prompt_token_ids":null,"prompt_text":null,"kv_transfer_params":null,"ec_transfer_params":null,"metrics":null}})---";
 
 // random json debugging utils
 static void printTabs(int tab);
@@ -45,19 +51,91 @@ static void sendData(String data) {
     luaWebSocket.broadcastTXT(output);
 }
 
-// static void luaTableToJson() {
-//     switch (lua_type(x)) {
-//         case integer:
-//             break;
-//         case number:
-//             break;
-//         case table:
-//             break;
-//     }
-// }
-//
-// static void luaArrayToJson() {
-// }
+static void luaTableToJson(JsonDocument &doc, lua_State *L, int tbl) {
+    Type type = NONE;
+
+    lua_pushnil(L);
+    while (lua_next(L, tbl) != 0) {
+        switch (lua_type(L, -2)) {
+            case LUA_TNUMBER:
+                {
+                    // Technically, it could be a float index
+                    // but ehh, stupid edge case
+                    if (type == NONE) {
+                        type = ARRAY;
+                        doc.to<JsonArray>();
+                    }
+                    if (type != ARRAY) {
+                        goto skip;
+                    }
+                    break;
+                }
+            case LUA_TSTRING:
+                {
+                    if (type == NONE) {
+                        type = OBJECT;
+                        doc.to<JsonObject>();
+                    }
+                    if (type != OBJECT) {
+                        goto skip;
+                    }
+                    break;
+                }
+            case LUA_TNIL:
+            case LUA_TBOOLEAN:
+            case LUA_TTABLE:
+            case LUA_TFUNCTION:
+            case LUA_TUSERDATA:
+            case LUA_TTHREAD:
+            case LUA_TLIGHTUSERDATA:
+            case LUA_TNONE:
+                goto skip;
+                break;
+        }
+
+#define ASSIGN(value) do { if (type == ARRAY) {doc.add((value));} else {doc[lua_tostring(L, -2)] = (value);} } while (0)
+        switch (lua_type(L, -1)) {
+            case LUA_TNIL:
+                {
+                    // TODO: test this
+                    ASSIGN(nullptr);
+                    break;
+                }
+            case LUA_TNUMBER:
+                {
+                    ASSIGN((double)lua_tonumber(L, -1));
+                    break;
+                }
+            case LUA_TBOOLEAN:
+                {
+                    ASSIGN((bool)lua_toboolean(L, -1));
+                    break;
+                }
+            case LUA_TSTRING:
+                {
+                    ASSIGN(lua_tostring(L, -1));
+                    break;
+                }
+            case LUA_TTABLE:
+                {
+                    JsonDocument value;
+                    luaTableToJson(value, L, lua_gettop(L));
+                    ASSIGN(value);
+                    break;
+                }
+            case LUA_TFUNCTION:
+            case LUA_TUSERDATA:
+            case LUA_TTHREAD:
+            case LUA_TLIGHTUSERDATA:
+            case LUA_TNONE:
+                break; // ignore
+        }
+#undef ASSIGN
+
+skip:
+        lua_pop(L, 1);
+    }
+}
 
 static void pushJsonVariant(lua_State *L, const JsonVariant &value);
 static void pushJsonArray(lua_State *L, const JsonArray &arr);
@@ -184,7 +262,17 @@ static int lua_delay(lua_State *L) {
 
 static int lua_agentic_send(lua_State *L) {
     const char *prompt = luaL_checkstring(L, 1);
-    // TODO opts table as 2nd arg
+    luaL_checktype(L, 2, LUA_TTABLE);
+
+    // Options
+    JsonDocument opts;
+    luaTableToJson(opts, L, 2);
+
+    String optsString;
+    serializeJson(opts, optsString);
+    Serial.printf("Opts: %s\n", optsString.c_str());
+
+    // Request json
     JsonDocument msg;
     msg["role"] = "user";
     msg["content"] = prompt;
@@ -194,11 +282,15 @@ static int lua_agentic_send(lua_State *L) {
     doc["messages"].add(msg);
     doc["stream"] = false;
 
-    String jsonString;
-    serializeJson(doc, jsonString);
+    String request;
+    serializeJson(doc, request);
+    Serial.printf("Request: %s\n", request.c_str());
 
-    // TODO return actual result
-    lua_pushstring(L, jsonString.c_str());
+    // Response json
+    JsonDocument response;
+    deserializeJson(response, testResponseString);
+
+    pushJsonVariant(L, response.as<JsonVariant>());
 
     return 1;
 }
@@ -256,7 +348,7 @@ void runLua(String code) {
 
     initLuaLib(L);
 
-    Serial.printf("Running lua, %s\n", code.c_str());
+    Serial.printf("Running lua:\n```\n%s\n```\n", code.c_str());
     err = luaL_dostring(L, code.c_str());
     if (err) {
         sendError(lua_tostring(L, -1));

@@ -143,12 +143,14 @@ void setup() {
     Serial.begin(115200);
     while (!Serial) {}
 
-    doLuaStuff();
-
     LittleFS.begin();
 
-    // FIXME: EMERGENCY, IMPLEMENT ARDUINO_10BASE_T1S SERVICE ROUTINE CORRECTLY
-    //  check framework-arduinopico/libraries/lwIP_USB_NCM for implementation maybe
+    Serial.print("/\n");
+    Dir root = LittleFS.openDir("/");
+    while (root.next()) {
+        Serial.printf("|- %s\n", root.fileName().c_str());
+    }
+
     setupNetwork();
 
     initStatus();
