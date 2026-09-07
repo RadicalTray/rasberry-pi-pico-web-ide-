@@ -4,7 +4,7 @@
 #include <FreeRTOS.h>
 #include <WiFiClient.h>
 
-#include "lua.hpp"
+#include "lua_stuff.hpp"
 #include "dhcp.hpp"
 #include "status.hpp"
 
@@ -142,8 +142,6 @@ void handleStop() {
 void setup() {
     Serial.begin(115200);
     while (!Serial) {}
-
-    while (true) {}
 
     LittleFS.begin();
 

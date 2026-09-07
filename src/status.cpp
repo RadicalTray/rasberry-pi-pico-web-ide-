@@ -5,7 +5,7 @@
 #include <WiFiClient.h>
 #include <MQTT.h>
 
-#include "lua.hpp"
+#include "lua_stuff.hpp"
 
 static int getPinMode(uint8_t pin) {
     if (pin >= NUM_DIGITAL_PINS) return -1;
