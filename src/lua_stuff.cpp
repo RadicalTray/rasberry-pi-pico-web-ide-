@@ -3,9 +3,8 @@
 #include <WebSocketsServer.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
+
+#include <lua.hpp>
 
 // #include "http_clients.hpp"
 
