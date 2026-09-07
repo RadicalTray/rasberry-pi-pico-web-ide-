@@ -51,6 +51,7 @@ static void sendData(String data) {
     luaWebSocket.broadcastTXT(output);
 }
 
+// NOTE: assumes number indices in a lua table guarantees the order
 static void luaTableToJson(JsonDocument &doc, lua_State *L, int tbl) {
     Type type = NONE;
 
@@ -95,12 +96,6 @@ static void luaTableToJson(JsonDocument &doc, lua_State *L, int tbl) {
 
 #define ASSIGN(value) do { if (type == ARRAY) {doc.add((value));} else {doc[lua_tostring(L, -2)] = (value);} } while (0)
         switch (lua_type(L, -1)) {
-            case LUA_TNIL:
-                {
-                    // TODO: test this
-                    ASSIGN(nullptr);
-                    break;
-                }
             case LUA_TNUMBER:
                 {
                     ASSIGN((double)lua_tonumber(L, -1));
@@ -121,6 +116,11 @@ static void luaTableToJson(JsonDocument &doc, lua_State *L, int tbl) {
                     JsonDocument value;
                     luaTableToJson(value, L, lua_gettop(L));
                     ASSIGN(value);
+                    break;
+                }
+            case LUA_TNIL:
+                {
+                    // think in lua, nil value means this key doesn't exist
                     break;
                 }
             case LUA_TFUNCTION:

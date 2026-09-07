@@ -572,12 +572,17 @@
         <textarea
           id="editor"
           spellcheck="false"
-          placeholder="-- Write your Lua code here..."
           onscroll="syncScroll()"
           oninput="updateLineNumbers()"
-        ></textarea>
+        >
+function setup()
+end
+
+function loop()
+end
+        </textarea>
       </div>
-      <div class="terminal" id="terminal">--- Web Terminal ---</div>
+      <div class="terminal" id="terminal"></div>
     </div>
 
     <div id="newFileModal" class="modal-overlay">
@@ -837,6 +842,26 @@
       const runBtn = document.getElementById("runBtn");
       const stopBtn = document.getElementById("stopBtn");
       const term = document.getElementById("terminal");
+      const chatInput = document.getElementById("chatInput");
+      const chatOutput = document.getElementById("chatOutput");
+
+      updateLineNumbers();
+
+      chatInput.addEventListener("keydown", (e) => {
+        if (e.getModifierState("Control") && e.key === "Enter") sendChat();
+      });
+
+      editor.addEventListener("keydown", function (e) {
+        if (e.key == "Tab") {
+          e.preventDefault();
+          let val = this.value,
+            start = this.selectionStart,
+            end = this.selectionEnd;
+          this.value = val.substring(0, start) + "\t" + val.substring(end);
+          this.selectionStart = this.selectionEnd = start + 1;
+          return false;
+        }
+      });
 
       const modeLabels = ["IN", "OUT", "IN_PU", "IN_PD"];
 
@@ -852,12 +877,6 @@
           connectLuaWS();
           connectStatusWS();
         } catch {}
-
-        document
-          .getElementById("chatInput")
-          .addEventListener("keydown", (e) => {
-            if (e.getModifierState("Control") && e.key === "Enter") sendChat();
-          });
       };
 
       function connectStatusWS() {
@@ -907,7 +926,8 @@
           });
 
           if (data.free_heap) {
-            ramText.innerText = "RAM: " + Math.round(data.free_heap / 1024) + " KB";
+            ramText.innerText =
+              "RAM: " + Math.round(data.free_heap / 1024) + " KB";
           }
 
           if (data.running) {
@@ -921,18 +941,15 @@
             runBtn.disabled = false;
             stopBtn.disabled = true;
           }
-
-          // FIXME
-          // if (data.logs && !isWsConnected) {
-          //   term.innerText += data.logs;
-          //   term.scrollTop = term.scrollHeight;
-          // }
         };
       }
 
       function updateLineNumbers() {
         const lines = editor.value.split("\n");
-        const count = lines.length;
+        let count = lines.length;
+        if (count > 1) {
+          count = count - 1;
+        }
         let numbers = "";
         for (let i = 1; i <= count; i++) {
           numbers += i + "<br>";
@@ -945,17 +962,28 @@
       }
 
       function connectLuaWS() {
-        luaWebSocket = new WebSocket("ws://" + window.location.hostname + ":81");
+        luaWebSocket = new WebSocket(
+          "ws://" + window.location.hostname + ":81",
+        );
         luaWebSocket.onopen = () => {};
         luaWebSocket.onclose = () => {
           console.log("WS Disconnected. Reconnecting...");
           setTimeout(connectLuaWS, 2000);
         };
         luaWebSocket.onmessage = (e) => {
-          const term = document.getElementById("terminal");
           // FIXME
-          term.innerText += e.data;
-          term.scrollTop = term.scrollHeight;
+          e.data
+            .json()
+            .then((json) => {
+              if (json.type === "data") {
+                term.innerText += json.data;
+                term.scrollTop = term.scrollHeight;
+              } else if (json.type === "error") {
+                term.innerText += `\nError: ${json.data}\n`;
+                term.scrollTop = term.scrollHeight;
+              }
+            })
+            .catch(() => {});
         };
         luaWebSocket.onerror = (err) => {
           luaWebSocket.close();
@@ -1001,10 +1029,12 @@
           .catch(() => {});
       }
       function runCode() {
+        term.innerText = "";
         fetch("/run", { method: "POST", body: editor.value }).catch(() => {});
       }
       function stopCode() {
         fetch("/stop", { method: "POST" }).catch(() => {});
+        term.innerText = "";
       }
       function newFile() {
         document.getElementById("newFileModal").classList.add("show");
@@ -1052,21 +1082,19 @@
         document.getElementById("chatPopup").classList.toggle("open");
       }
       function sendChat() {
-        const input = document.getElementById("chatInput");
-        const output = document.getElementById("chatOutput");
-        const text = input.value.trim();
+        const text = chatInput.value.trim();
         if (!text) return;
-        output.value = "Sending...";
+        chatOutput.value = "Sending...";
         fetch("http://localhost:8282", {
           method: "POST",
           body: text,
         })
           .then((r) => r.text())
           .then((t) => {
-            output.value = t;
+            chatOutput.value = t;
           })
           .catch((err) => {
-            output.value = "Error: " + err.message;
+            chatOutput.value = "Error: " + err.message;
           });
       }
     </script>
