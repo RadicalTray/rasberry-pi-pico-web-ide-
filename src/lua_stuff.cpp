@@ -6,6 +6,17 @@
 
 #include <lua.hpp>
 
+#include "debug.hpp"
+
+unsigned long prev_time = 0;
+static void timer(const char *name) {
+    auto now = millis();
+    if (name != nullptr) {
+        Serial.printf("%s took %d ms\n", name, now - prev_time);
+    }
+    prev_time = now;
+}
+
 // #include "http_clients.hpp"
 
 enum Type {
@@ -283,7 +294,13 @@ static int lua_agentic_send(lua_State *L) {
     // Request json
     const String url = "http://vaam01.3bbddns.com:43954/v1/chat/completions";
     HTTPClient http;
+    timer(nullptr);
     if (http.begin(url)) {
+        timer("begin() (success)");
+
+        http.addHeader("Content-Type", "application/json");
+        http.setTimeout(20 * 1000); // 20 seconds
+
         JsonDocument messages;
         luaTableToJson(messages, L, 1);
 
@@ -306,10 +323,15 @@ static int lua_agentic_send(lua_State *L) {
         serializeJson(doc, request);
         Serial.printf("Request: %s\n", request.c_str());
 
-        http.addHeader("Content-Type", "application/json");
+        timer(nullptr);
         int httpCode = http.POST(request);
+        timer("POST");
+
         if (httpCode > 0) {
+            timer(nullptr);
             String responseString = http.getString();
+            timer("getString()");
+
             Serial.printf("got response: %s\n", responseString.c_str());
             JsonDocument response;
             deserializeJson(response, responseString);
@@ -323,6 +345,7 @@ static int lua_agentic_send(lua_State *L) {
             return 0;
         }
     } else {
+        timer("begin() (failure)");
         String err = "can't connect to " + url;
         lua_pushstring(L, err.c_str());
         lua_error(L); // never returns
@@ -414,6 +437,7 @@ void runLua(String code) {
 
     // Calls setup()
     // can still block the thread bruh
+    Serial.printf("Running setup()\n", code.c_str());
     if (lua_getglobal(L, "setup") == LUA_TFUNCTION) {
         err = lua_pcall(L, 0, 0, 0);
         if (err) {

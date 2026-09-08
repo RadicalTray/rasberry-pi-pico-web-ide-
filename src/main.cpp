@@ -7,6 +7,7 @@
 #include "lua_stuff.hpp"
 #include "dhcp.hpp"
 #include "status.hpp"
+#include "debug.hpp"
 
 #if defined(USE_LAN8651) && !defined(USE_ETHUSB)
 
