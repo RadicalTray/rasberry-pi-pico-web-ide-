@@ -19,7 +19,7 @@ Nushell cmd:
 		http://vaam01.3bbddns.com:43954/v1/chat/completions
 		-H "Content-Type: application/json"
 		-d '{"model":"/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4","messages":[{"content":"hello","role":"user"},{"content":"Hello! How can I help you today?","role":"assistant"},{"content":"how to write lua?","role":"user"}],"stream":false}'
-) | save -f test_multiple_messages.txt
+) | save test_multiple_messages.txt
 ```
 
 Response:

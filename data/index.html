@@ -416,16 +416,87 @@
       .chat-output {
         flex: 1;
         padding: 16px;
-        font-family: monospace;
-        font-size: 13px;
-        color: #4c1d95;
         background: #fafaf9;
         overflow-y: auto;
-        white-space: pre-wrap;
         line-height: 1.5;
-        border: none;
-        resize: none;
-        outline: none;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .chat-bubble {
+        max-width: 85%;
+        padding: 10px 14px;
+        border-radius: 16px;
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+      }
+      .chat-bubble.user {
+        align-self: flex-end;
+        background: linear-gradient(135deg, #a78bfa 0%, #818cf8 100%);
+        color: #fff;
+        border-bottom-right-radius: 4px;
+        font-family: system-ui, sans-serif;
+      }
+      .chat-bubble.assistant {
+        align-self: flex-start;
+        background: #fff;
+        color: #4c1d95;
+        border: 1px solid #f3e8ff;
+        border-bottom-left-radius: 4px;
+        font-family: system-ui, sans-serif;
+      }
+      .chat-bubble.error {
+        align-self: flex-start;
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fecaca;
+        border-bottom-left-radius: 4px;
+      }
+      .chat-bubble pre {
+        background: #1e1e2e;
+        color: #a6e3a1;
+        padding: 8px 12px;
+        border-radius: 8px;
+        overflow-x: auto;
+        font-size: 12px;
+        margin: 6px 0;
+      }
+      .chat-bubble code {
+        font-family: monospace;
+        font-size: 12px;
+        background: rgba(124, 58, 237, 0.08);
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+      .chat-bubble pre code {
+        background: none;
+        padding: 0;
+      }
+      .chat-typing {
+        align-self: flex-start;
+        display: flex;
+        gap: 4px;
+        padding: 10px 14px;
+        background: #fff;
+        border: 1px solid #f3e8ff;
+        border-radius: 16px;
+        border-bottom-left-radius: 4px;
+      }
+      .chat-typing span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #c4b5fd;
+        animation: bounce 1.2s infinite;
+      }
+      .chat-typing span:nth-child(2) { animation-delay: 0.2s; }
+      .chat-typing span:nth-child(3) { animation-delay: 0.4s; }
+      @keyframes bounce {
+        0%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-6px); }
       }
     </style>
   </head>
@@ -813,23 +884,19 @@ end</textarea>
       <div class="chat-topbar">
         <span class="chat-topbar-title">Chat</span>
         <div style="display: flex; gap: 8px">
-          <button class="btn btn-run" onclick="sendChat()">Send</button>
+          <button class="btn btn-run" id="chatSendBtn" onclick="sendChat()">Send</button>
           <button class="btn btn-cancel" onclick="toggleChat()">Close</button>
         </div>
       </div>
-      <textarea
+      <div
         class="chat-output"
         id="chatOutput"
-        readonly
-        placeholder="Response will appear here..."
-      >
-      </textarea>
+      ></div>
       <textarea
         class="chat-input"
         id="chatInput"
         placeholder="Type a message... (Ctrl + Enter to send)"
-      >
-      </textarea>
+      ></textarea>
     </div>
 
     <script>
@@ -843,6 +910,11 @@ end</textarea>
       const term = document.getElementById("terminal");
       const chatInput = document.getElementById("chatInput");
       const chatOutput = document.getElementById("chatOutput");
+      const chatSendBtn = document.getElementById("chatSendBtn");
+
+      const AI_URL = "http://vaam01.3bbddns.com:43954/v1/chat/completions";
+      const AI_MODEL = "/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4";
+      let chatHistory = [];
 
       updateLineNumbers();
 
@@ -1071,20 +1143,79 @@ end</textarea>
       function toggleChat() {
         document.getElementById("chatPopup").classList.toggle("open");
       }
+
+      function renderMarkdown(text) {
+        let html = text
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+          return "<pre><code>" + code.trim() + "</code></pre>";
+        });
+        html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+        html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        html = html.replace(/### (.+)/g, "<strong>$1</strong>");
+        return html;
+      }
+
+      function addChatBubble(role, text) {
+        const bubble = document.createElement("div");
+        bubble.className = "chat-bubble " + role;
+        if (role === "assistant") {
+          bubble.innerHTML = renderMarkdown(text);
+        } else {
+          bubble.textContent = text;
+        }
+        chatOutput.appendChild(bubble);
+        chatOutput.scrollTop = chatOutput.scrollHeight;
+      }
+
+      function showTyping() {
+        const typing = document.createElement("div");
+        typing.className = "chat-typing";
+        typing.id = "chatTyping";
+        typing.innerHTML = "<span></span><span></span><span></span>";
+        chatOutput.appendChild(typing);
+        chatOutput.scrollTop = chatOutput.scrollHeight;
+      }
+
+      function removeTyping() {
+        const el = document.getElementById("chatTyping");
+        if (el) el.remove();
+      }
+
       function sendChat() {
         const text = chatInput.value.trim();
         if (!text) return;
-        chatOutput.value = "Sending...";
-        fetch("http://localhost:8282", {
+        chatInput.value = "";
+        addChatBubble("user", text);
+        chatHistory.push({ role: "user", content: text });
+        chatSendBtn.disabled = true;
+        showTyping();
+
+        fetch(AI_URL, {
           method: "POST",
-          body: text,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: AI_MODEL,
+            messages: chatHistory,
+            stream: false,
+          }),
         })
-          .then((r) => r.text())
-          .then((t) => {
-            chatOutput.value = t;
+          .then((r) => r.json())
+          .then((data) => {
+            removeTyping();
+            const reply = data.choices?.[0]?.message?.content || "(no response)";
+            chatHistory.push({ role: "assistant", content: reply });
+            addChatBubble("assistant", reply);
           })
           .catch((err) => {
-            chatOutput.value = "Error: " + err.message;
+            removeTyping();
+            addChatBubble("error", "Error: " + err.message);
+          })
+          .finally(() => {
+            chatSendBtn.disabled = false;
+            chatInput.focus();
           });
       }
     </script>
