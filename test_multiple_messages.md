@@ -22,6 +22,7 @@ Nushell cmd:
 ) | save -f test_multiple_messages.txt
 ```
 
+Response:
 ```text
 HTTP/1.1 200 OK
 Content-Length: 6345
