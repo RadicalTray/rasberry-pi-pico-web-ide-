@@ -358,12 +358,12 @@ static int lua_sen66_beginI2C(lua_State *L) {
     // (at least gpio 20+)
 
     if (sda % 4 != 0 && sda % 4 != 2) {
-        lua_pushstring(L, "Invalid SDA Pin");
+        lua_pushstring(L, "Invalid SDA Pin (got SCL)");
         lua_error(L); // noreturn
     }
 
     if (scl % 4 != 1 && scl % 4 != 3) {
-        lua_pushstring(L, "Invalid SCL Pin");
+        lua_pushstring(L, "Invalid SCL Pin (got SDA)");
         lua_error(L); // noreturn
     }
 
