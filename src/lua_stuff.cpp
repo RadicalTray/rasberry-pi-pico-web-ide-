@@ -1,13 +1,23 @@
 #include <Arduino.h>
+#include <Wire.h>
 #include <ArduinoJson.h>
 #include <WebSocketsServer.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
+#include <SensirionCore.h>
 
 #include <lua.hpp>
 
 #include "debug.hpp"
 #include "http_clients.hpp"
+
+// 7-bit, Arduino supports :thumbsup:
+#define SEN66_ADDR               0x6B
+
+#define SEN66_COMMAND_START      0x0021
+#define SEN66_COMMAND_STOP       0x0104
+#define SEN66_COMMAND_DATA_READY 0x0202
+#define SEN66_COMMAND_DATA_READ  0x0300
 
 static void printTabs(int tab);
 static void printValue(int tab, const JsonVariant &value);
@@ -26,7 +36,14 @@ enum Type {
 
 static WiFiClient net;
 static WebSocketsServer luaWebSocket(81);
+static String runningCode;
 static lua_State *runningLua = nullptr;
+
+static TwoWire *sen66Wire = nullptr;
+static uint8_t txBuffer[256];
+static uint8_t rxBuffer[256];
+static SensirionI2CTxFrame txFrame(txBuffer, 256);
+static SensirionI2CRxFrame rxFrame(rxBuffer, 256);
 
 static void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {}
 
@@ -327,6 +344,137 @@ static int lua_agentic_wait(lua_State *L) {
     return 1;
 }
 
+static int lua_sen66_beginI2C(lua_State *L) {
+    int sda = luaL_checkinteger(L, 1);
+    checkGPIO(L, sda);
+    int scl = luaL_checkinteger(L, 2);
+    checkGPIO(L, scl);
+
+    // gpio % 4
+    //  0 -> I2C0 SDA
+    //  1 -> I2C0 SCL
+    //  2 -> I2C1 SDA
+    //  3 -> I2C1 SCL
+    // (at least gpio 20+)
+
+    if (sda % 4 != 0 && sda % 4 != 2) {
+        lua_pushstring(L, "Invalid SDA Pin");
+        lua_error(L); // noreturn
+    }
+
+    if (scl % 4 != 1 && scl % 4 != 3) {
+        lua_pushstring(L, "Invalid SCL Pin");
+        lua_error(L); // noreturn
+    }
+
+    if (sda % 4 == 0 && scl % 4 == 1) {
+        Wire.setSDA(sda);
+        Wire.setSCL(scl);
+        Wire.begin();
+        sen66Wire = &Wire;
+    } else if (sda % 4 == 2 && scl % 4 == 3) {
+        Wire1.setSDA(sda);
+        Wire1.setSCL(scl);
+        Wire1.begin();
+        sen66Wire = &Wire1;
+    } else {
+        lua_pushstring(L, "SDA and SCL on different I2C");
+        lua_error(L); // noreturn
+    }
+
+    uint16_t err = 0;
+    err |= txFrame.addCommand(SEN66_COMMAND_START);
+    err |= SensirionI2CCommunication::sendFrame(SEN66_ADDR, txFrame, *sen66Wire);
+    delay(50);
+    err |= SensirionI2CCommunication::receiveFrame(SEN66_ADDR, 0, rxFrame, *sen66Wire);
+
+    return 0;
+}
+
+static int lua_sen66_read(lua_State *L) {
+    if (!sen66Wire) {
+        lua_pushstring(L, "Sen66 I2C uninitialized");
+        lua_error(L); // noreturn
+    }
+
+    uint8_t crc = 0;
+    uint16_t err = 0;
+
+    uint16_t ready = 0;
+    while (ready == 0) {
+        err |= txFrame.addCommand(SEN66_COMMAND_DATA_READY);
+        err |= SensirionI2CCommunication::sendFrame(SEN66_ADDR, txFrame, *sen66Wire);
+        delay(20);
+        err |= SensirionI2CCommunication::receiveFrame(SEN66_ADDR, 3, rxFrame, *sen66Wire);
+        err |= rxFrame.getUInt16(ready);
+        err |= rxFrame.getUInt8(crc); // FIXME: do i need to read crc?
+    }
+
+    txFrame.addCommand(SEN66_COMMAND_DATA_READ);
+    err |= SensirionI2CCommunication::sendFrame(SEN66_ADDR, txFrame, *sen66Wire);
+    delay(20);
+    err |= SensirionI2CCommunication::receiveFrame(SEN66_ADDR, 27, rxFrame, *sen66Wire);
+
+    uint16_t pm1_0;
+    err |= rxFrame.getUInt16(pm1_0);
+    err |= rxFrame.getUInt8(crc);
+
+    uint16_t pm2_5;
+    err |= rxFrame.getUInt16(pm2_5);
+    err |= rxFrame.getUInt8(crc);
+
+    uint16_t pm4_0;
+    err |= rxFrame.getUInt16(pm4_0);
+    err |= rxFrame.getUInt8(crc);
+
+    uint16_t pm10_0;
+    err |= rxFrame.getUInt16(pm10_0);
+    err |= rxFrame.getUInt8(crc);
+
+    int16_t humidity;
+    err |= rxFrame.getInt16(humidity);
+    err |= rxFrame.getUInt8(crc);
+
+    int16_t temperature;
+    err |= rxFrame.getInt16(temperature);
+    err |= rxFrame.getUInt8(crc);
+
+    int16_t voc;
+    err |= rxFrame.getInt16(voc);
+    err |= rxFrame.getUInt8(crc);
+
+    int16_t nox;
+    err |= rxFrame.getInt16(nox);
+    err |= rxFrame.getUInt8(crc);
+
+    uint16_t co2;
+    err |= rxFrame.getUInt16(co2);
+    err |= rxFrame.getUInt8(crc);
+
+    int key = 1;
+    lua_newtable(L);
+    lua_pushinteger(L, pm1_0); lua_setfield(L, -2, "PM1.0");
+    lua_pushinteger(L, pm2_5); lua_setfield(L, -2, "PM2.5");
+    lua_pushinteger(L, pm4_0); lua_setfield(L, -2, "PM4.0");
+    lua_pushinteger(L, pm10_0); lua_setfield(L, -2, "PM10.0");
+    lua_pushinteger(L, humidity); lua_setfield(L, -2, "humidity");
+    lua_pushinteger(L, temperature); lua_setfield(L, -2, "temperature");
+    lua_pushinteger(L, voc); lua_setfield(L, -2, "VOC");
+    lua_pushinteger(L, nox); lua_setfield(L, -2, "NOx");
+    lua_pushinteger(L, co2); lua_setfield(L, -2, "CO2");
+
+    return 1;
+}
+
+// FIXME send update to the web ui
+static int lua_status_update(lua_State *L) {
+    const char *name = luaL_checkstring(L, 1);
+    int value = luaL_checkinteger(L, 2);
+    lua_pushstring(L, "unimplemented");
+    lua_error(L);
+    return 0;
+}
+
 static void initLuaLib(lua_State *L) {
     luaL_openlibs(L);
 
@@ -338,6 +486,17 @@ static void initLuaLib(lua_State *L) {
     lua_register(L, "pinMode", lua_pinMode);
     lua_register(L, "delay", lua_delay);
 
+    // TODO: run this with lua, probably needs to move lua out of the main thread 1st
+    // must also check for Wire (I2C0) and not Wire1 (I2C1) pins
+    //
+    // setI2Cx setups before lua setup()
+    //
+    // must wait >=24 seconds to use it again without errors after stopping Sen66 tho
+    lua_newtable(L);
+    lua_pushcfunction(L, lua_sen66_beginI2C); lua_setfield(L, -2, "beginI2C");
+    lua_pushcfunction(L, lua_sen66_read); lua_setfield(L, -2, "read");
+    lua_setglobal(L, "sen66");
+
     lua_pushinteger(L, HIGH); lua_setglobal(L, "HIGH");
     lua_pushinteger(L, LOW); lua_setglobal(L, "LOW");
     lua_pushinteger(L, LED_BUILTIN); lua_setglobal(L, "LED_BUILTIN");
@@ -346,9 +505,24 @@ static void initLuaLib(lua_State *L) {
     lua_pushinteger(L, INPUT_PULLUP); lua_setglobal(L, "INPUT_PULLUP");
     lua_pushinteger(L, INPUT_PULLDOWN); lua_setglobal(L, "INPUT_PULLDOWN");
 
+    lua_pushinteger(L, 20); lua_setglobal(L, "D0");
+    lua_pushinteger(L, 21); lua_setglobal(L, "D1");
+    lua_pushinteger(L, 22); lua_setglobal(L, "D2");
+    lua_pushinteger(L, 23); lua_setglobal(L, "D3");
+    lua_pushinteger(L, 24); lua_setglobal(L, "D4");
+    lua_pushinteger(L, 25); lua_setglobal(L, "D5");
+    lua_pushinteger(L, 26); lua_setglobal(L, "A0");
+    lua_pushinteger(L, 27); lua_setglobal(L, "A1");
+    lua_pushinteger(L, 28); lua_setglobal(L, "A2");
+    lua_pushinteger(L, 29); lua_setglobal(L, "A3");
+
+    // there's luaL_openlib() or something that does exactly this
     lua_newtable(L);
     lua_pushcfunction(L, lua_agentic_send); lua_setfield(L, -2, "send");
     lua_setglobal(L, "agentic");
+
+    // TODO: how should we impl this?
+    // lua_register(L, "pinName", lua_pinName); // names pin in the web interface
 }
 
 void stopLua() {
@@ -356,7 +530,18 @@ void stopLua() {
     if (runningLua) {
         lua_close(runningLua);
         httpClear();
+        runningCode = "";
         runningLua = nullptr;
+
+        if (sen66Wire) {
+            uint16_t err = 0;
+            err |= txFrame.addCommand(SEN66_COMMAND_STOP);
+            err |= SensirionI2CCommunication::sendFrame(SEN66_ADDR, txFrame, *sen66Wire);
+            delay(1400);
+            err |= SensirionI2CCommunication::receiveFrame(SEN66_ADDR, 0, rxFrame, *sen66Wire);
+            (*sen66Wire).end();
+            sen66Wire = nullptr;
+        }
 
         for (int i = 20; i <= 29; i++) {
             digitalWrite(i, LOW);
@@ -376,6 +561,7 @@ void runLua(String code) {
         sendError("Failed to initialize lua");
         return;
     }
+    runningCode = code;
 
     auto L = runningLua;
 

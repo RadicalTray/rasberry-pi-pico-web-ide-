@@ -1037,7 +1037,6 @@ end</textarea>
           setTimeout(connectLuaWS, 2000);
         };
         luaWebSocket.onmessage = (e) => {
-          // FIXME
           const json = JSON.parse(e.data);
           if (json.type === "data") {
             term.innerText += json.data;

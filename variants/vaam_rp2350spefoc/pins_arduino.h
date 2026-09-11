@@ -46,8 +46,10 @@
 #define PIN_ETH_IRQ    (14u)
 
 // Wire
-#define PIN_WIRE0_SDA  (10u)     // pico pin must be this pair
-#define PIN_WIRE0_SCL  (11u)     //..
+#define PIN_WIRE0_SDA  (20u)     // pico pin must be this pair
+#define PIN_WIRE0_SCL  (21u)     //..
+#define PIN_WIRE1_SDA  (22u)
+#define PIN_WIRE1_SCL  (23u)
 
 // LCD - EXT
 #define PIN_LCD_CS     (7u)      // LCD Chip Select
